@@ -1,2 +1,3 @@
-input/
-output/
+data/*
+test/*
+!test/test.md
