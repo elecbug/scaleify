@@ -1,0 +1,531 @@
+{
+  "id": "japan_cluster_3",
+  "label": "Japan Cluster 3",
+  "region": "Japan",
+  "description": "Unsupervised style cluster 3/3 inferred from 8 monophonic corpus files. Scale and melodic grammar were learned from the cluster rather than supplied by a template.",
+  "scale": [
+    0,
+    2,
+    5,
+    7,
+    10
+  ],
+  "auxiliary_degrees": {
+    "9": 0.045481
+  },
+  "grammar": {
+    "pitch_deviation_weight": 0.9,
+    "motion_preservation_weight": 0.25,
+    "contour_penalty": 0.8,
+    "leap_penalty": 0.08,
+    "max_preferred_leap": 7.0,
+    "candidate_shift_semitones": 4.5,
+    "candidate_count": 7,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "phrase_gap_ms": 150.0,
+    "phrase_long_note_factor": 1.65,
+    "phrase_leap_semitones": 7.0,
+    "min_phrase_events": 3,
+    "degree_weights": {
+      "0": 0.5904,
+      "7": 0.3229
+    },
+    "interval_weights": {
+      "2": 2.2925,
+      "3": 1.4056,
+      "5": 0.2202
+    },
+    "transition_weights": {
+      "10>0": 1.1299,
+      "0>10": 0.9546,
+      "5>7": 0.9285,
+      "5>2": 0.9225,
+      "7>5": 0.8848,
+      "2>5": 0.787,
+      "0>2": 0.621,
+      "2>0": 0.5508,
+      "7>10": 0.5031,
+      "0>7": 0.2337,
+      "10>7": 0.1706
+    },
+    "ascending_transition_weights": {
+      "7>10": 2.0669,
+      "2>5": 1.6277,
+      "5>7": 1.546,
+      "10>0": 1.4651,
+      "0>2": 1.4176,
+      "7>0": 0.141
+    },
+    "descending_transition_weights": {
+      "10>7": 2.04,
+      "5>2": 1.5479,
+      "0>10": 1.5185,
+      "7>5": 1.3873,
+      "2>0": 1.1906,
+      "0>7": 0.9079
+    },
+    "trigram_weights": {
+      "10>0>10": 1.5326,
+      "10>0>2": 1.4974,
+      "0>10>0": 1.496,
+      "10>7>10": 1.4276,
+      "2>0>10": 1.3796,
+      "5>2>0": 1.3475,
+      "5>2>5": 1.3345,
+      "2>5>7": 1.3319,
+      "7>5>2": 1.2431,
+      "2>5>2": 1.1386,
+      "7>10>0": 1.1293,
+      "5>7>5": 1.0095,
+      "0>2>5": 0.9281,
+      "10>0>5": 0.8077,
+      "10>0>7": 0.787,
+      "2>0>2": 0.7667,
+      "0>10>7": 0.7215,
+      "5>7>10": 0.6952,
+      "7>5>7": 0.6394,
+      "0>2>0": 0.6216,
+      "2>10>0": 0.5886,
+      "0>5>2": 0.5376,
+      "0>7>5": 0.4203,
+      "0>2>10": 0.3653
+    },
+    "preferred_phrases": [
+      {
+        "degrees": [
+          10,
+          0,
+          10,
+          0
+        ],
+        "weight": 2.121,
+        "support_count": 14,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          2,
+          5,
+          7,
+          5
+        ],
+        "weight": 2.1002,
+        "support_count": 19,
+        "support_files": 6
+      },
+      {
+        "degrees": [
+          2,
+          5,
+          7,
+          5,
+          2
+        ],
+        "weight": 2.0853,
+        "support_count": 9,
+        "support_files": 6
+      },
+      {
+        "degrees": [
+          2,
+          5,
+          2,
+          5,
+          7
+        ],
+        "weight": 2.0437,
+        "support_count": 11,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          2,
+          0,
+          10,
+          0
+        ],
+        "weight": 2.032,
+        "support_count": 15,
+        "support_files": 6
+      },
+      {
+        "degrees": [
+          5,
+          2,
+          5,
+          7
+        ],
+        "weight": 2.0202,
+        "support_count": 19,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          5,
+          2,
+          0,
+          2,
+          5
+        ],
+        "weight": 1.9927,
+        "support_count": 9,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          10,
+          0,
+          2,
+          0
+        ],
+        "weight": 1.9907,
+        "support_count": 14,
+        "support_files": 6
+      },
+      {
+        "degrees": [
+          7,
+          5,
+          2,
+          0
+        ],
+        "weight": 1.9593,
+        "support_count": 19,
+        "support_files": 6
+      },
+      {
+        "degrees": [
+          10,
+          0,
+          10,
+          0,
+          2
+        ],
+        "weight": 1.9272,
+        "support_count": 9,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          0,
+          10,
+          0,
+          2
+        ],
+        "weight": 1.9107,
+        "support_count": 14,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          5,
+          2,
+          0,
+          10,
+          0
+        ],
+        "weight": 1.8885,
+        "support_count": 8,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          0,
+          10,
+          0,
+          2,
+          0
+        ],
+        "weight": 1.8502,
+        "support_count": 7,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          5,
+          2,
+          0,
+          10
+        ],
+        "weight": 1.8218,
+        "support_count": 10,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          10,
+          0,
+          5,
+          2,
+          0
+        ],
+        "weight": 1.8109,
+        "support_count": 7,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          10,
+          7,
+          10,
+          0
+        ],
+        "weight": 1.8003,
+        "support_count": 9,
+        "support_files": 4
+      }
+    ],
+    "cadence_degrees": {
+      "0": 0.5061,
+      "7": 0.2113
+    },
+    "cadence_patterns": [
+      {
+        "degrees": [
+          0,
+          7,
+          0
+        ],
+        "weight": 1.4544,
+        "support_count": 7,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          5,
+          0
+        ],
+        "weight": 0.9005,
+        "support_count": 5,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          7,
+          0
+        ],
+        "weight": 0.8708,
+        "support_count": 9,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          5,
+          7
+        ],
+        "weight": 0.5776,
+        "support_count": 15,
+        "support_files": 6
+      },
+      {
+        "degrees": [
+          7,
+          5,
+          7
+        ],
+        "weight": 0.4376,
+        "support_count": 4,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          0,
+          7
+        ],
+        "weight": 0.4348,
+        "support_count": 7,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          5,
+          2,
+          5,
+          7
+        ],
+        "weight": 0.4057,
+        "support_count": 6,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          5,
+          2,
+          0
+        ],
+        "weight": 0.3249,
+        "support_count": 9,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          2,
+          5,
+          7
+        ],
+        "weight": 0.3187,
+        "support_count": 8,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          7,
+          5
+        ],
+        "weight": 0.267,
+        "support_count": 11,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          2,
+          0,
+          10,
+          0
+        ],
+        "weight": 0.2451,
+        "support_count": 4,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          2,
+          0
+        ],
+        "weight": 0.1151,
+        "support_count": 10,
+        "support_files": 4
+      }
+    ]
+  },
+  "rhythm": {
+    "enabled": true,
+    "preserve_phrase_duration": true,
+    "quantize_strength": 0.2,
+    "preferred_duration_ratios": [
+      0.5,
+      0.6667,
+      1.0,
+      1.25,
+      1.5,
+      2.0
+    ],
+    "degree_duration_multipliers": {},
+    "phrase_end_multiplier": 1.345,
+    "gap_multiplier": 1.0,
+    "max_duration_change": 0.3
+  },
+  "tuning": {
+    "degree_cents": {}
+  },
+  "ornaments": [],
+  "modulation": {
+    "enabled": false,
+    "options": []
+  },
+  "notes": "Unsupervised corpus-derived v10.1 profile. Ornament/modulation rules were intentionally left empty because they were not estimated robustly.",
+  "training": {
+    "generated_utc": "2026-08-22T16:20:43.936819+00:00",
+    "method": "scaleify_unsupervised_cluster_v3",
+    "cluster_index": 3,
+    "cluster_count": 3,
+    "files_analyzed": 8,
+    "events": 1077,
+    "phrases": 92,
+    "inferred_scale": [
+      0,
+      2,
+      5,
+      7,
+      10
+    ],
+    "inferred_scale_coverage": 0.9457,
+    "auxiliary_degrees": {
+      "9": 0.045481
+    },
+    "scale_selection": {
+      "selection_reason": "coverage_elbow",
+      "core_min_coverage": 0.9,
+      "complexity_penalty": 0.02,
+      "auxiliary_min_share": 0.015,
+      "candidates": [
+        {
+          "notes": 5,
+          "scale": [
+            0,
+            2,
+            5,
+            7,
+            10
+          ],
+          "coverage": 0.945727,
+          "cutoff_share": 0.086559,
+          "next_share": 0.045481,
+          "gap": 0.041078,
+          "score": 0.041078,
+          "eligible": true
+        },
+        {
+          "notes": 6,
+          "scale": [
+            0,
+            2,
+            5,
+            7,
+            9,
+            10
+          ],
+          "coverage": 0.991208,
+          "cutoff_share": 0.045481,
+          "next_share": 0.004995,
+          "gap": 0.040486,
+          "score": 0.020486,
+          "eligible": true
+        },
+        {
+          "notes": 7,
+          "scale": [
+            0,
+            2,
+            4,
+            5,
+            7,
+            9,
+            10
+          ],
+          "coverage": 0.996202,
+          "cutoff_share": 0.004995,
+          "next_share": 0.001764,
+          "gap": 0.003231,
+          "score": -0.036769,
+          "eligible": true
+        }
+      ]
+    },
+    "root_distribution": {
+      "A": 2,
+      "C": 1,
+      "D": 1,
+      "G": 4
+    },
+    "source_files": [
+      "asaku_tomo.wav",
+      "kappore.wav",
+      "kappore_honen.wav",
+      "oki_no_taisen.wav",
+      "riukiu_bushi.wav",
+      "sedo_no_danbatake.wav",
+      "suiryo_bushi.wav",
+      "yube_yonda.wav"
+    ],
+    "fixes": [
+      "out-of-scale degrees excluded from melodic grammar",
+      "out-of-scale notes break melodic runs",
+      "same-degree repetitions excluded from melodic transitions",
+      "cadence requires count and cross-file support",
+      "core scale separated from auxiliary degrees using occupancy elbow",
+      "roots iteratively refined against cluster core scale"
+    ]
+  }
+}

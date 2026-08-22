@@ -1,0 +1,485 @@
+{
+  "id": "korea_cluster_1",
+  "label": "Korea Cluster 1",
+  "region": "Korea",
+  "description": "Unsupervised style cluster 1/2 inferred from 23 monophonic corpus files. Scale and melodic grammar were learned from the cluster rather than supplied by a template.",
+  "scale": [
+    0,
+    2,
+    3,
+    5,
+    7,
+    10
+  ],
+  "auxiliary_degrees": {
+    "4": 0.041621,
+    "9": 0.029418
+  },
+  "grammar": {
+    "pitch_deviation_weight": 0.9,
+    "motion_preservation_weight": 0.25,
+    "contour_penalty": 0.8,
+    "leap_penalty": 0.08,
+    "max_preferred_leap": 7.0,
+    "candidate_shift_semitones": 4.5,
+    "candidate_count": 8,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "phrase_gap_ms": 150.0,
+    "phrase_long_note_factor": 1.65,
+    "phrase_leap_semitones": 7.0,
+    "min_phrase_events": 3,
+    "degree_weights": {
+      "0": 1.6872
+    },
+    "interval_weights": {
+      "7": 1.3783,
+      "5": 1.2029,
+      "12": 1.0698,
+      "2": 0.8283,
+      "3": 0.1605
+    },
+    "transition_weights": {
+      "7>2": 0.7629,
+      "5>0": 0.6469,
+      "2>7": 0.5715,
+      "0>5": 0.5344,
+      "0>2": 0.5333,
+      "0>7": 0.5332,
+      "7>0": 0.5171,
+      "0>3": 0.5051,
+      "3>0": 0.4504,
+      "10>5": 0.4504,
+      "3>5": 0.4203,
+      "2>0": 0.3987,
+      "0>10": 0.3945,
+      "10>7": 0.3025,
+      "5>3": 0.2964,
+      "5>10": 0.2328,
+      "10>0": 0.1361
+    },
+    "ascending_transition_weights": {
+      "2>7": 1.2506,
+      "3>5": 1.0168,
+      "5>0": 0.9174,
+      "7>0": 0.7704,
+      "10>5": 0.7278,
+      "0>3": 0.6783,
+      "0>2": 0.6568,
+      "10>0": 0.6533,
+      "7>10": 0.6193,
+      "5>10": 0.5559,
+      "7>2": 0.5098,
+      "0>7": 0.4955,
+      "3>10": 0.358,
+      "0>5": 0.34,
+      "2>5": 0.0976,
+      "3>7": 0.0762
+    },
+    "descending_transition_weights": {
+      "10>7": 1.1116,
+      "7>2": 1.084,
+      "0>10": 1.0342,
+      "5>3": 1.0284,
+      "0>5": 0.8362,
+      "3>0": 0.6659,
+      "2>0": 0.6451,
+      "0>7": 0.5852,
+      "5>0": 0.3982,
+      "7>0": 0.3294,
+      "10>5": 0.1553,
+      "0>2": 0.1339,
+      "10>3": 0.0572
+    },
+    "trigram_weights": {
+      "2>7>2": 1.9273,
+      "3>5>3": 1.7763,
+      "3>0>3": 1.6279,
+      "7>2>7": 1.5693,
+      "10>5>10": 1.3073,
+      "10>5>3": 1.2635,
+      "5>3>5": 1.2431,
+      "3>0>10": 1.1639,
+      "0>10>7": 1.1451,
+      "5>0>10": 1.1108,
+      "10>7>0": 1.0721,
+      "7>0>7": 1.0682,
+      "10>7>10": 1.0059,
+      "5>10>5": 0.998,
+      "2>0>2": 0.9594,
+      "3>7>3": 0.9586,
+      "10>0>5": 0.9133,
+      "10>0>10": 0.8578,
+      "3>5>10": 0.8056,
+      "5>0>5": 0.7958,
+      "3>0>5": 0.761,
+      "5>0>2": 0.7102,
+      "7>3>7": 0.6965,
+      "0>3>0": 0.6786
+    },
+    "preferred_phrases": [
+      {
+        "degrees": [
+          0,
+          3,
+          0,
+          3
+        ],
+        "weight": 2.0563,
+        "support_count": 16,
+        "support_files": 7
+      },
+      {
+        "degrees": [
+          0,
+          3,
+          0,
+          3,
+          0
+        ],
+        "weight": 1.9133,
+        "support_count": 9,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          3,
+          0,
+          3,
+          0
+        ],
+        "weight": 1.8819,
+        "support_count": 13,
+        "support_files": 6
+      },
+      {
+        "degrees": [
+          0,
+          5,
+          0,
+          5,
+          0
+        ],
+        "weight": 1.8733,
+        "support_count": 21,
+        "support_files": 10
+      },
+      {
+        "degrees": [
+          0,
+          2,
+          7,
+          2
+        ],
+        "weight": 1.8143,
+        "support_count": 15,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          5,
+          0,
+          10,
+          7
+        ],
+        "weight": 1.8085,
+        "support_count": 18,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          7,
+          0,
+          7,
+          0,
+          7
+        ],
+        "weight": 1.7899,
+        "support_count": 16,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          3,
+          5,
+          3,
+          0
+        ],
+        "weight": 1.7281,
+        "support_count": 9,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          0,
+          7,
+          0,
+          7
+        ],
+        "weight": 1.6648,
+        "support_count": 46,
+        "support_files": 7
+      },
+      {
+        "degrees": [
+          3,
+          0,
+          3,
+          5
+        ],
+        "weight": 1.6528,
+        "support_count": 6,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          5,
+          3,
+          5,
+          3
+        ],
+        "weight": 1.6477,
+        "support_count": 6,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          5,
+          0,
+          5,
+          0
+        ],
+        "weight": 1.58,
+        "support_count": 36,
+        "support_files": 12
+      },
+      {
+        "degrees": [
+          5,
+          0,
+          10,
+          0
+        ],
+        "weight": 1.5702,
+        "support_count": 17,
+        "support_files": 6
+      },
+      {
+        "degrees": [
+          7,
+          0,
+          7,
+          0
+        ],
+        "weight": 1.5146,
+        "support_count": 36,
+        "support_files": 7
+      },
+      {
+        "degrees": [
+          0,
+          3,
+          0,
+          3,
+          5
+        ],
+        "weight": 1.5109,
+        "support_count": 4,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          3,
+          0,
+          3,
+          5,
+          0
+        ],
+        "weight": 1.5109,
+        "support_count": 4,
+        "support_files": 4
+      }
+    ],
+    "cadence_degrees": {
+      "0": 0.2836
+    },
+    "cadence_patterns": [
+      {
+        "degrees": [
+          5,
+          2,
+          0
+        ],
+        "weight": 0.6226,
+        "support_count": 4,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          10,
+          7,
+          0
+        ],
+        "weight": 0.358,
+        "support_count": 28,
+        "support_files": 3
+      }
+    ]
+  },
+  "rhythm": {
+    "enabled": true,
+    "preserve_phrase_duration": true,
+    "quantize_strength": 0.2,
+    "preferred_duration_ratios": [
+      0.25,
+      0.75,
+      1.0,
+      1.25,
+      1.5,
+      2.0
+    ],
+    "degree_duration_multipliers": {
+      "0": 1.1064,
+      "5": 0.9057,
+      "10": 0.9583,
+      "7": 1.0408
+    },
+    "phrase_end_multiplier": 1.7686,
+    "gap_multiplier": 1.0,
+    "max_duration_change": 0.3
+  },
+  "tuning": {
+    "degree_cents": {}
+  },
+  "ornaments": [],
+  "modulation": {
+    "enabled": false,
+    "options": []
+  },
+  "notes": "Unsupervised corpus-derived v10.1 profile. Ornament/modulation rules were intentionally left empty because they were not estimated robustly.",
+  "training": {
+    "generated_utc": "2026-08-22T16:52:56.813315+00:00",
+    "method": "scaleify_unsupervised_cluster_v3",
+    "cluster_index": 1,
+    "cluster_count": 2,
+    "files_analyzed": 23,
+    "events": 6307,
+    "phrases": 902,
+    "inferred_scale": [
+      0,
+      2,
+      3,
+      5,
+      7,
+      10
+    ],
+    "inferred_scale_coverage": 0.9107,
+    "auxiliary_degrees": {
+      "4": 0.041621,
+      "9": 0.029418
+    },
+    "scale_selection": {
+      "selection_reason": "coverage_elbow",
+      "core_min_coverage": 0.9,
+      "complexity_penalty": 0.02,
+      "auxiliary_min_share": 0.015,
+      "candidates": [
+        {
+          "notes": 5,
+          "scale": [
+            0,
+            2,
+            3,
+            5,
+            7
+          ],
+          "coverage": 0.863656,
+          "cutoff_share": 0.050786,
+          "next_share": 0.047038,
+          "gap": 0.003748,
+          "score": 0.003748,
+          "eligible": false
+        },
+        {
+          "notes": 6,
+          "scale": [
+            0,
+            2,
+            3,
+            5,
+            7,
+            10
+          ],
+          "coverage": 0.910694,
+          "cutoff_share": 0.047038,
+          "next_share": 0.041621,
+          "gap": 0.005417,
+          "score": -0.014583,
+          "eligible": true
+        },
+        {
+          "notes": 7,
+          "scale": [
+            0,
+            2,
+            3,
+            4,
+            5,
+            7,
+            10
+          ],
+          "coverage": 0.952315,
+          "cutoff_share": 0.041621,
+          "next_share": 0.029418,
+          "gap": 0.012203,
+          "score": -0.027797,
+          "eligible": true
+        }
+      ]
+    },
+    "root_distribution": {
+      "A": 2,
+      "A#": 1,
+      "C": 6,
+      "D": 1,
+      "D#": 4,
+      "E": 2,
+      "F": 1,
+      "F#": 1,
+      "G": 5
+    },
+    "source_files": [
+      "cheonan_samgeori.wav",
+      "gaegori_taryeong_jeolla.wav",
+      "gaetaryeong.wav",
+      "gakseori_taryeong.wav",
+      "ganggangsullae.wav",
+      "gangwon_arirang.wav",
+      "geomjilmaegi.wav",
+      "geomundo_baetnorae.wav",
+      "geumgangsan_taryeong.wav",
+      "gin_arirang.wav",
+      "gungcho_daenggi.wav",
+      "gwanghallu.wav",
+      "gyeongbokgung_taryeong.wav",
+      "gyeonggi_arirang.wav",
+      "jindo_arirang.wav",
+      "kkaturi_taryeong.wav",
+      "miryang_arirang.wav",
+      "nongbuga.wav",
+      "saeya_saeya_parangsaeya.wav",
+      "seodo_arirang.wav",
+      "ulsan_agassi.wav",
+      "yeongnam_arirang.wav",
+      "yukjabaegi.wav"
+    ],
+    "fixes": [
+      "out-of-scale degrees excluded from melodic grammar",
+      "out-of-scale notes break melodic runs",
+      "same-degree repetitions excluded from melodic transitions",
+      "cadence requires count and cross-file support",
+      "core scale separated from auxiliary degrees using occupancy elbow",
+      "roots iteratively refined against cluster core scale"
+    ]
+  }
+}

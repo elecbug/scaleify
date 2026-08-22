@@ -1,0 +1,499 @@
+{
+  "id": "china_cluster_2",
+  "label": "China Cluster 2",
+  "region": "China",
+  "description": "Unsupervised style cluster 2/2 inferred from 10 monophonic corpus files. Scale and melodic grammar were learned from the cluster rather than supplied by a template.",
+  "scale": [
+    0,
+    3,
+    5,
+    7,
+    10
+  ],
+  "auxiliary_degrees": {},
+  "grammar": {
+    "pitch_deviation_weight": 0.9,
+    "motion_preservation_weight": 0.25,
+    "contour_penalty": 0.8,
+    "leap_penalty": 0.08,
+    "max_preferred_leap": 7.0,
+    "candidate_shift_semitones": 4.5,
+    "candidate_count": 7,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "phrase_gap_ms": 150.0,
+    "phrase_long_note_factor": 1.65,
+    "phrase_leap_semitones": 7.0,
+    "min_phrase_events": 3,
+    "degree_weights": {
+      "0": 0.6803
+    },
+    "interval_weights": {
+      "12": 1.3939,
+      "2": 1.0621,
+      "3": 0.8985,
+      "5": 0.6561,
+      "7": 0.6091
+    },
+    "transition_weights": {
+      "0>3": 0.6151,
+      "7>5": 0.5383,
+      "3>0": 0.4766,
+      "5>0": 0.3858,
+      "5>7": 0.3784,
+      "10>7": 0.3676,
+      "3>5": 0.356,
+      "0>10": 0.3223,
+      "7>10": 0.3191,
+      "0>7": 0.2718,
+      "10>3": 0.163,
+      "10>5": 0.1585,
+      "7>0": 0.1487,
+      "10>0": 0.1437,
+      "5>3": 0.0921
+    },
+    "ascending_transition_weights": {
+      "3>5": 1.149,
+      "7>10": 1.1444,
+      "10>0": 0.9248,
+      "0>3": 0.7944,
+      "7>0": 0.5991,
+      "5>7": 0.5778,
+      "5>0": 0.4814,
+      "10>3": 0.3781,
+      "10>5": 0.2268,
+      "0>7": 0.2159
+    },
+    "descending_transition_weights": {
+      "10>7": 1.3655,
+      "0>10": 1.3057,
+      "7>5": 0.8793,
+      "5>3": 0.8551,
+      "3>0": 0.8126,
+      "5>0": 0.4253,
+      "7>3": 0.2045,
+      "0>7": 0.1298,
+      "0>5": 0.0995,
+      "3>10": 0.0715,
+      "10>5": 0.0712
+    },
+    "trigram_weights": {
+      "10>3>10": 1.1471,
+      "5>7>5": 0.9232,
+      "3>0>3": 0.9168,
+      "0>3>0": 0.7358,
+      "7>5>7": 0.7221,
+      "0>7>10": 0.6887,
+      "5>3>5": 0.6838,
+      "3>10>7": 0.664,
+      "5>10>5": 0.6573,
+      "3>5>3": 0.6262,
+      "7>5>3": 0.6165,
+      "3>0>10": 0.5992,
+      "7>0>7": 0.597,
+      "5>3>0": 0.5921,
+      "7>10>3": 0.584,
+      "7>10>7": 0.5745,
+      "10>7>10": 0.5701,
+      "10>7>5": 0.558,
+      "3>5>7": 0.551,
+      "7>3>5": 0.551,
+      "0>3>5": 0.5497,
+      "0>10>7": 0.5338,
+      "0>10>3": 0.4838,
+      "7>5>10": 0.4779
+    },
+    "preferred_phrases": [
+      {
+        "degrees": [
+          10,
+          3,
+          10,
+          7
+        ],
+        "weight": 1.4155,
+        "support_count": 6,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          5,
+          7,
+          5,
+          3
+        ],
+        "weight": 1.3189,
+        "support_count": 6,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          0,
+          10,
+          3,
+          10
+        ],
+        "weight": 1.2688,
+        "support_count": 6,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          7,
+          5,
+          7,
+          5
+        ],
+        "weight": 1.2336,
+        "support_count": 6,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          3,
+          0,
+          3,
+          5
+        ],
+        "weight": 1.2059,
+        "support_count": 7,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          7,
+          10,
+          3,
+          10
+        ],
+        "weight": 1.1875,
+        "support_count": 4,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          7,
+          5,
+          10,
+          5
+        ],
+        "weight": 1.177,
+        "support_count": 5,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          3,
+          0,
+          3,
+          0
+        ],
+        "weight": 1.1336,
+        "support_count": 6,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          7,
+          5,
+          3,
+          5
+        ],
+        "weight": 1.0909,
+        "support_count": 4,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          7,
+          3,
+          0,
+          3
+        ],
+        "weight": 1.0725,
+        "support_count": 5,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          0,
+          3,
+          0,
+          3
+        ],
+        "weight": 1.0623,
+        "support_count": 7,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          5,
+          10,
+          5,
+          7
+        ],
+        "weight": 1.0526,
+        "support_count": 4,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          5,
+          7,
+          5,
+          0
+        ],
+        "weight": 1.0422,
+        "support_count": 6,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          10,
+          7,
+          10,
+          0
+        ],
+        "weight": 1.0358,
+        "support_count": 4,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          10,
+          7,
+          0,
+          7
+        ],
+        "weight": 0.9877,
+        "support_count": 4,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          0,
+          3,
+          0,
+          5
+        ],
+        "weight": 0.9775,
+        "support_count": 6,
+        "support_files": 4
+      }
+    ],
+    "cadence_degrees": {
+      "0": 0.3261
+    },
+    "cadence_patterns": [
+      {
+        "degrees": [
+          7,
+          5,
+          10,
+          5
+        ],
+        "weight": 0.7602,
+        "support_count": 5,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          5,
+          10,
+          5
+        ],
+        "weight": 0.5737,
+        "support_count": 7,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          10,
+          3,
+          10
+        ],
+        "weight": 0.3004,
+        "support_count": 7,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          0,
+          7,
+          0
+        ],
+        "weight": 0.2808,
+        "support_count": 6,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          5,
+          0
+        ],
+        "weight": 0.2012,
+        "support_count": 22,
+        "support_files": 8
+      },
+      {
+        "degrees": [
+          0,
+          5,
+          0
+        ],
+        "weight": 0.1885,
+        "support_count": 7,
+        "support_files": 7
+      },
+      {
+        "degrees": [
+          3,
+          10
+        ],
+        "weight": 0.157,
+        "support_count": 9,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          10,
+          5
+        ],
+        "weight": 0.1287,
+        "support_count": 9,
+        "support_files": 5
+      }
+    ]
+  },
+  "rhythm": {
+    "enabled": true,
+    "preserve_phrase_duration": true,
+    "quantize_strength": 0.2,
+    "preferred_duration_ratios": [
+      0.6667,
+      0.75,
+      1.0,
+      1.25,
+      1.5,
+      2.0
+    ],
+    "degree_duration_multipliers": {
+      "0": 1.0612
+    },
+    "phrase_end_multiplier": 1.8,
+    "gap_multiplier": 1.0,
+    "max_duration_change": 0.3
+  },
+  "tuning": {
+    "degree_cents": {}
+  },
+  "ornaments": [],
+  "modulation": {
+    "enabled": false,
+    "options": []
+  },
+  "notes": "Unsupervised corpus-derived v10.1 profile. Ornament/modulation rules were intentionally left empty because they were not estimated robustly.",
+  "training": {
+    "generated_utc": "2026-08-22T17:09:54.291091+00:00",
+    "method": "scaleify_unsupervised_cluster_v3",
+    "cluster_index": 2,
+    "cluster_count": 2,
+    "files_analyzed": 10,
+    "events": 2123,
+    "phrases": 226,
+    "inferred_scale": [
+      0,
+      3,
+      5,
+      7,
+      10
+    ],
+    "inferred_scale_coverage": 0.9556,
+    "auxiliary_degrees": {},
+    "scale_selection": {
+      "selection_reason": "coverage_elbow",
+      "core_min_coverage": 0.9,
+      "complexity_penalty": 0.02,
+      "auxiliary_min_share": 0.015,
+      "candidates": [
+        {
+          "notes": 5,
+          "scale": [
+            0,
+            3,
+            5,
+            7,
+            10
+          ],
+          "coverage": 0.95555,
+          "cutoff_share": 0.148571,
+          "next_share": 0.014249,
+          "gap": 0.134322,
+          "score": 0.134322,
+          "eligible": true
+        },
+        {
+          "notes": 6,
+          "scale": [
+            0,
+            2,
+            3,
+            5,
+            7,
+            10
+          ],
+          "coverage": 0.9698,
+          "cutoff_share": 0.014249,
+          "next_share": 0.0092,
+          "gap": 0.005049,
+          "score": -0.014951,
+          "eligible": true
+        },
+        {
+          "notes": 7,
+          "scale": [
+            0,
+            2,
+            3,
+            5,
+            7,
+            8,
+            10
+          ],
+          "coverage": 0.979,
+          "cutoff_share": 0.0092,
+          "next_share": 0.008396,
+          "gap": 0.000804,
+          "score": -0.039196,
+          "eligible": true
+        }
+      ]
+    },
+    "root_distribution": {
+      "A": 3,
+      "B": 1,
+      "D": 5,
+      "F#": 1
+    },
+    "source_files": [
+      "cai_binlang.wav",
+      "dui_hua.wav",
+      "kangding_qingge.wav",
+      "longchuan_diao.wav",
+      "luoshui_tian.wav",
+      "qingsi_niao.wav",
+      "shan_xian_jun.wav",
+      "shezu_qingge.wav",
+      "xia_sichuan.wav",
+      "xiu_hebao.wav"
+    ],
+    "fixes": [
+      "out-of-scale degrees excluded from melodic grammar",
+      "out-of-scale notes break melodic runs",
+      "same-degree repetitions excluded from melodic transitions",
+      "cadence requires count and cross-file support",
+      "core scale separated from auxiliary degrees using occupancy elbow",
+      "roots iteratively refined against cluster core scale"
+    ]
+  }
+}
