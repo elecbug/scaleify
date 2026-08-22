@@ -290,9 +290,24 @@ def _candidate_notes(source_pitch: float, allowed: np.ndarray, grammar: GrammarP
     return allowed[ranked].astype(np.int16)
 
 
-def extract_note_events(source_midi: np.ndarray, grammar: GrammarProfile) -> tuple[NoteEvent, ...]:
-    """Turn a smoothed frame-level pitch track into stable note events."""
+def extract_note_events(
+    source_midi: np.ndarray,
+    grammar: GrammarProfile,
+    onset_frames: np.ndarray | tuple[int, ...] | list[int] | None = None,
+    onset_retrigger_min_frames: int = 1,
+) -> tuple[NoteEvent, ...]:
+    """Turn a frame-level pitch track into stable note events.
+
+    A new event starts when either:
+      1. F0 changes by ``event_pitch_change``, or
+      2. an onset/re-attack is detected after the current event has existed
+         for at least ``onset_retrigger_min_frames``.
+
+    The second rule is what separates repeated equal-pitch notes (C-C, G-G).
+    """
     source_midi = np.asarray(source_midi, dtype=np.float64)
+    onset_set = {int(x) for x in (onset_frames if onset_frames is not None else [])}
+    retrigger_min = max(1, int(onset_retrigger_min_frames))
     events: list[NoteEvent] = []
 
     i = 0
@@ -308,7 +323,14 @@ def extract_note_events(source_midi: np.ndarray, grammar: GrammarProfile) -> tup
         while i < len(source_midi) and np.isfinite(source_midi[i]):
             value = float(source_midi[i])
             median = float(np.median(values))
-            if abs(value - median) >= grammar.event_pitch_change:
+
+            pitch_boundary = abs(value - median) >= grammar.event_pitch_change
+            onset_boundary = (
+                i in onset_set
+                and (i - start) >= retrigger_min
+            )
+
+            if pitch_boundary or onset_boundary:
                 events.append(NoteEvent(start, i, float(np.median(values))))
                 start = i
                 values = [value]
@@ -580,8 +602,15 @@ def map_melody_viterbi(
     profile: StyleProfile,
     style_amount: float,
     enable_modulation: bool = True,
+    onset_frames: np.ndarray | tuple[int, ...] | list[int] | None = None,
+    onset_retrigger_min_frames: int = 1,
 ) -> MappingResult:
-    events = extract_note_events(source_midi, profile.grammar)
+    events = extract_note_events(
+        source_midi,
+        profile.grammar,
+        onset_frames=onset_frames,
+        onset_retrigger_min_frames=onset_retrigger_min_frames,
+    )
     phrases = detect_phrases(events, sr, hop_length, profile.grammar)
 
     targets: list[tuple[int, ...]] = []

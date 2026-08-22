@@ -272,6 +272,49 @@ def extract_source_pitch(
     return midi, np.clip(confidence, 0.0, 1.0)
 
 
+def detect_note_onsets(
+    y: np.ndarray,
+    sr: int,
+    hop_length: int,
+    delta: float,
+    min_separation_ms: float,
+) -> np.ndarray:
+    """Detect note attacks/re-attacks independently of F0 changes.
+
+    This is crucial for repeated notes such as C-C or G-G: pitch tracking alone
+    sees no pitch boundary, but a fresh attack still represents a new note.
+
+    ``delta`` controls onset sensitivity after librosa's onset-envelope
+    normalization. Higher values are more conservative.
+    """
+    onset_env = librosa.onset.onset_strength(
+        y=y,
+        sr=sr,
+        hop_length=hop_length,
+    )
+
+    wait_frames = max(
+        1,
+        int(round(min_separation_ms / 1000.0 * sr / hop_length)),
+    )
+
+    frames = librosa.onset.onset_detect(
+        onset_envelope=onset_env,
+        sr=sr,
+        hop_length=hop_length,
+        units="frames",
+        backtrack=False,
+        pre_max=3,
+        post_max=3,
+        pre_avg=10,
+        post_avg=10,
+        delta=max(0.0, float(delta)),
+        wait=wait_frames,
+    )
+
+    return np.asarray(frames, dtype=np.int64)
+
+
 def nearest_scale_note(note: int, allowed: np.ndarray, steps: int) -> int:
     idx = int(np.argmin(np.abs(allowed.astype(np.float64) - note)))
     idx = int(np.clip(idx + steps, 0, len(allowed) - 1))
@@ -753,6 +796,35 @@ def main() -> None:
     parser.add_argument("--hop-length", type=int, default=256)
     parser.add_argument("--smoothing-frames", type=int, default=5)
     parser.add_argument("--gap-ms", type=float, default=12.0)
+    parser.add_argument(
+        "--no-onset-segmentation",
+        action="store_true",
+        help="Disable attack/re-attack based note splitting; use F0 changes only.",
+    )
+    parser.add_argument(
+        "--onset-delta",
+        type=float,
+        default=0.15,
+        help=(
+            "Onset sensitivity threshold. Lower is more sensitive; "
+            "0.10-0.20 is a useful range for clean melodic audio."
+        ),
+    )
+    parser.add_argument(
+        "--onset-min-separation-ms",
+        type=float,
+        default=70.0,
+        help="Minimum spacing between detected attack candidates.",
+    )
+    parser.add_argument(
+        "--onset-retrigger-min-ms",
+        type=float,
+        default=80.0,
+        help=(
+            "Minimum current-note age before an onset may split a same-pitch "
+            "re-attack. Prevents the initial attack from splitting one note."
+        ),
+    )
     parser.add_argument("--timbre", choices=["sine", "flute", "reed", "pluck"], default="flute")
     parser.add_argument("--seed", type=int, default=1479)
     parser.add_argument("--no-ornaments", action="store_true")
@@ -806,6 +878,22 @@ def main() -> None:
         gap_ms=args.gap_ms,
     )
 
+    if args.no_onset_segmentation:
+        onset_frames = np.asarray([], dtype=np.int64)
+    else:
+        onset_frames = detect_note_onsets(
+            y=y,
+            sr=sr,
+            hop_length=args.hop_length,
+            delta=args.onset_delta,
+            min_separation_ms=args.onset_min_separation_ms,
+        )
+    onset_retrigger_min_frames = max(
+        1,
+        int(round(args.onset_retrigger_min_ms / 1000.0 * sr / args.hop_length)),
+    )
+    print(f"Detected onset candidates: {len(onset_frames)}")
+
     mapping = map_melody_viterbi(
         source_midi=source_midi,
         sr=sr,
@@ -814,6 +902,8 @@ def main() -> None:
         profile=profile,
         style_amount=args.style_amount,
         enable_modulation=not args.no_modulation,
+        onset_frames=onset_frames,
+        onset_retrigger_min_frames=onset_retrigger_min_frames,
     )
     print(f"Detected events: {sum(len(p.events) for p in mapping.phrases)}")
     print(f"Detected phrases: {len(mapping.phrases)}")
@@ -834,7 +924,7 @@ def main() -> None:
         seed=args.seed,
     )
 
-    output = args.output or args.input.with_name(f"{args.input.stem}_{profile.id}_v9.wav")
+    output = args.output or args.input.with_name(f"{args.input.stem}_{profile.id}_v9_1.wav")
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), render.audio, sr, subtype="PCM_24")
 
@@ -848,6 +938,11 @@ def main() -> None:
         "root": NOTE_NAMES[root_pc],
         "style_amount": args.style_amount,
         "rhythm_amount": rhythm_amount,
+        "onset_segmentation": not args.no_onset_segmentation,
+        "onset_candidates": int(len(onset_frames)),
+        "onset_delta": args.onset_delta,
+        "onset_min_separation_ms": args.onset_min_separation_ms,
+        "onset_retrigger_min_ms": args.onset_retrigger_min_ms,
         "ornaments_enabled": not args.no_ornaments,
         "microtuning_enabled": not args.no_microtuning,
         "modulation_enabled": not args.no_modulation,

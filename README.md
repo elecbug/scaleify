@@ -199,3 +199,35 @@ For each detected phrase, the mapper compares the base style and allowed modulat
 ## Important limitation
 
 The included profiles are heuristic style-transfer models. A culture or tradition cannot be reduced to one scale or one JSON file. The profiles intentionally focus on a few audible cues for experimentation: scale-degree use, melodic transition statistics, phrase endings, rhythm, ornaments, and tuning.
+
+## Onset-aware repeated-note segmentation (v9.1)
+
+Pitch changes alone cannot distinguish repeated equal-pitch notes such as
+`C C | G G | A A`. v9.1 therefore combines F0 segmentation with an onset
+/re-attack detector. A new note event begins when either the tracked pitch
+changes enough or a sufficiently separated onset is detected.
+
+Relevant CLI options:
+
+```bash
+--onset-delta 0.15
+--onset-min-separation-ms 70
+--onset-retrigger-min-ms 80
+--no-onset-segmentation
+```
+
+- `--onset-delta`: higher values are more conservative. For clean synthetic
+  melody tests, about `0.10` to `0.20` is a useful range.
+- `--onset-min-separation-ms`: minimum spacing between attack candidates.
+- `--onset-retrigger-min-ms`: a detected onset cannot split a note until the
+  current note is at least this old. This prevents the initial attack from
+  splitting a single note into two events.
+- `--no-onset-segmentation`: restores the old F0-change-only behavior for
+  ablation/debugging.
+
+Regression check with the bundled/generated Twinkle melody:
+
+- old F0-only segmentation: 24 detected events
+- onset-aware segmentation: 42 detected events
+
+The expected melody contains 42 pitched notes.
