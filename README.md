@@ -28,14 +28,22 @@ MP3/WAV/FLAC
 
 ## Included styles
 
-Only five cultural profiles plus one neutral reference are included initially:
+The package includes a deliberately small set of cultural/experimental profiles:
 
 - `chinese_gong`
 - `japanese_in`
 - `korean_pyeongjo`
 - `arabic_hijaz`
 - `indian_bhairav`
+- `irish_dorian`
+- `spanish_flamenco`
+- `hungarian_minor`
+- `swedish_dorian_polska`
 - `neutral_major` (reference)
+
+The European profiles are intentionally narrow experiments rather than national summaries.
+For example, `irish_dorian` targets Dorian-colored Irish tune behavior, while
+`swedish_dorian_polska` is a Dorian/Polska-inspired engineering approximation.
 
 List them with:
 
@@ -231,3 +239,82 @@ Regression check with the bundled/generated Twinkle melody:
 - onset-aware segmentation: 42 detected events
 
 The expected melody contains 42 pitched notes.
+
+
+## Corpus-driven style tuning
+
+`train_style.py` updates an existing style profile from every WAV file in a
+folder. The source JSON is never overwritten.
+
+```bash
+python train_style.py styles/japanese_in.json corpus/japanese
+```
+
+Default output:
+
+```text
+styles/japanese_in_tuned.json
+styles/japanese_in_tuned_training_report.json
+```
+
+If `japanese_in_tuned.json` already exists, the trainer creates
+`japanese_in_tuned_2.json`, then `_3`, etc. The output profile also receives a
+new style `id`, so the original and tuned JSON can stay in the same `styles/`
+directory without duplicate-ID errors.
+
+Explicit output:
+
+```bash
+python train_style.py \
+    styles/japanese_in.json \
+    corpus/japanese \
+    --output styles/japanese_in_corpus.json
+```
+
+The trainer learns target-corpus statistics for degree/interval weights,
+direction-aware transitions, trigrams, recurring 4/5-note phrases, cadence
+behavior, relative note-duration patterns, and optional degree-specific
+microtuning. It preserves transform-safety parameters, ornaments and modulation
+policy because those cannot be inferred reliably from target WAVs alone.
+
+For best results, use monophonic or melody-dominant WAV files.
+
+
+# v10: unsupervised corpus trainer
+
+The trainer no longer requires an input style JSON.
+
+```bash
+python train_style.py dataset/japan
+```
+
+Default output:
+
+```text
+styles/generated/
+├── japan_cluster_1.json
+├── japan_cluster_2.json
+├── ...
+├── japan_cluster_assignments.csv
+└── japan_cluster_report.json
+```
+
+The number of clusters is selected automatically by NumPy k-means +
+silhouette score:
+
+```bash
+python train_style.py dataset/japan --clusters auto
+```
+
+Or force a count:
+
+```bash
+python train_style.py dataset/japan --clusters 3
+```
+
+The generated styles infer their own scale. Notes outside the inferred scale
+are excluded from melodic grammar and break n-gram runs. Equal-note re-attacks
+remain in rhythm statistics but are excluded from melodic transition weights.
+Cadence patterns require both minimum occurrence count and cross-file support.
+
+No ornament or modulation rules are invented automatically.
