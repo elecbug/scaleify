@@ -2,7 +2,7 @@
   "id": "korean_pyeongjo",
   "label": "Korean Pyeongjo",
   "region": "Korea",
-  "description": "Pyeongjo-oriented pentatonic stylization emphasizing boncheong/tonic and the fifth, with stronger oscillation on structural tones.",
+  "description": "Pyeongjo-oriented pentatonic stylization with structural tonic/fifth emphasis, phrase-ending holds, and stronger pitch oscillation on structural tones.",
   "scale": [
     0,
     2,
@@ -11,57 +11,185 @@
     9
   ],
   "grammar": {
-    "pitch_deviation_weight": 0.95,
-    "motion_preservation_weight": 0.26,
-    "contour_penalty": 0.8,
-    "leap_penalty": 0.1,
+    "pitch_deviation_weight": 0.9,
+    "motion_preservation_weight": 0.22,
+    "contour_penalty": 0.75,
+    "leap_penalty": 0.09,
     "max_preferred_leap": 7,
-    "candidate_shift_semitones": 3.5,
+    "candidate_shift_semitones": 4.0,
     "candidate_count": 6,
     "event_pitch_change": 0.8,
     "min_event_frames": 4,
+    "phrase_gap_ms": 155,
+    "phrase_long_note_factor": 1.65,
+    "phrase_leap_semitones": 7,
+    "min_phrase_events": 3,
     "interval_weights": {
-      "2": 1.0,
-      "3": 1.15,
-      "5": 0.55,
-      "7": 0.75
+      "2": 1.05,
+      "3": 1.2,
+      "5": 0.6,
+      "7": 0.82
     },
     "degree_weights": {
-      "0": 1.45,
-      "7": 1.35,
-      "2": 0.3,
+      "0": 1.6,
+      "7": 1.45,
+      "2": 0.32,
       "4": 0.3,
-      "9": 0.3
+      "9": 0.35
     },
     "transition_weights": {
-      "7>0": 1.2,
-      "0>7": 0.95,
-      "9>7": 0.7,
-      "7>9": 0.5,
-      "2>0": 0.55,
-      "0>2": 0.45,
-      "4>2": 0.5,
-      "2>4": 0.4
+      "7>0": 1.35,
+      "0>7": 1.0,
+      "9>7": 0.78
     },
+    "ascending_transition_weights": {
+      "0>2": 0.6,
+      "2>4": 0.52,
+      "4>7": 0.82,
+      "7>9": 0.55,
+      "0>7": 1.05
+    },
+    "descending_transition_weights": {
+      "9>7": 0.95,
+      "7>4": 0.72,
+      "4>2": 0.62,
+      "2>0": 0.82,
+      "7>0": 1.45
+    },
+    "trigram_weights": {
+      "9>7>0": 1.85,
+      "4>2>0": 1.2,
+      "0>7>9": 1.0,
+      "9>7>4": 1.05,
+      "7>4>2": 0.9
+    },
+    "preferred_phrases": [
+      {
+        "degrees": [
+          9,
+          7,
+          0
+        ],
+        "weight": 2.0
+      },
+      {
+        "degrees": [
+          4,
+          2,
+          0
+        ],
+        "weight": 1.45
+      },
+      {
+        "degrees": [
+          0,
+          7,
+          9,
+          7
+        ],
+        "weight": 1.35
+      }
+    ],
     "cadence_degrees": {
-      "0": 1.5,
-      "7": 0.8
-    }
-  },
-  "ornament": {
-    "grace_probability": 0.34,
-    "grace_scale_steps": -1,
-    "grace_fraction": 0.16,
-    "vibrato_cents": 24.0,
-    "vibrato_hz": 4.6,
-    "vibrato_degrees": [
-      0,
-      7
+      "0": 1.85,
+      "7": 0.95
+    },
+    "cadence_patterns": [
+      {
+        "degrees": [
+          7,
+          0
+        ],
+        "weight": 1.75
+      },
+      {
+        "degrees": [
+          9,
+          7,
+          0
+        ],
+        "weight": 2.15
+      },
+      {
+        "degrees": [
+          2,
+          0
+        ],
+        "weight": 1.0
+      }
     ]
   },
-  "notes": "Heuristic profile. Pyeongjo is represented as the pentatonic set 1-2-3-5-6; structural emphasis is biased toward tonic and fifth.",
-  "references": [
-    "https://kiss.kstudy.com/Detail/Ar?key=3990615"
+  "rhythm": {
+    "enabled": true,
+    "preserve_phrase_duration": true,
+    "quantize_strength": 0.12,
+    "preferred_duration_ratios": [
+      0.5,
+      1.0,
+      1.5,
+      2.0,
+      3.0
+    ],
+    "degree_duration_multipliers": {
+      "0": 1.3,
+      "7": 1.22,
+      "2": 0.94
+    },
+    "phrase_end_multiplier": 1.3,
+    "gap_multiplier": 1.08,
+    "max_duration_change": 0.36
+  },
+  "tuning": {
+    "degree_cents": {}
+  },
+  "ornaments": [
+    {
+      "type": "grace",
+      "degrees": [
+        2,
+        9
+      ],
+      "probability": 0.28,
+      "scale_steps": -1,
+      "fraction": 0.14,
+      "max_ms": 85
+    },
+    {
+      "type": "slide_in",
+      "degrees": [
+        0,
+        7
+      ],
+      "probability": 0.32,
+      "scale_steps": -1,
+      "fraction": 0.15,
+      "max_ms": 100
+    },
+    {
+      "type": "slide_out",
+      "degrees": [
+        7
+      ],
+      "probability": 0.18,
+      "scale_steps": -1,
+      "fraction": 0.12,
+      "max_ms": 90
+    },
+    {
+      "type": "vibrato",
+      "degrees": [
+        0,
+        7
+      ],
+      "probability": 0.78,
+      "depth_cents": 28,
+      "rate_hz": 4.5,
+      "delay_fraction": 0.12
+    }
   ],
-  "model_status": "heuristic style-transfer profile; not an authoritative ethnomusicological model"
+  "modulation": {
+    "enabled": false,
+    "options": []
+  },
+  "notes": "Heuristic profile; the strong degree-conditioned oscillation is a stylization of sigimsae-like behavior, not a complete gugak performance model."
 }

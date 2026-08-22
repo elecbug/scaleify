@@ -1,8 +1,8 @@
 {
   "id": "indian_bhairav",
-  "label": "Hindustani Bhairav (12-TET approximation)",
+  "label": "Hindustani Bhairav",
   "region": "North India",
-  "description": "Bhairav-oriented stylization using komal Re and Dha, emphasizing those degrees and common Bhairav phrase fragments.",
+  "description": "Bhairav-oriented model emphasizing komal Re/Dha, directional phrase fragments, sustained structural tones, and degree-conditioned oscillation.",
   "scale": [
     0,
     1,
@@ -13,60 +13,184 @@
     11
   ],
   "grammar": {
-    "pitch_deviation_weight": 0.9,
-    "motion_preservation_weight": 0.18,
-    "contour_penalty": 0.65,
-    "leap_penalty": 0.08,
+    "pitch_deviation_weight": 0.82,
+    "motion_preservation_weight": 0.14,
+    "contour_penalty": 0.58,
+    "leap_penalty": 0.07,
     "max_preferred_leap": 8,
-    "candidate_shift_semitones": 3.5,
+    "candidate_shift_semitones": 5.0,
     "candidate_count": 7,
     "event_pitch_change": 0.8,
     "min_event_frames": 4,
+    "phrase_gap_ms": 155,
+    "phrase_long_note_factor": 1.65,
+    "phrase_leap_semitones": 8,
+    "min_phrase_events": 3,
     "interval_weights": {
-      "1": 1.25,
-      "3": 1.2,
-      "4": 0.65,
-      "5": 0.5,
-      "7": 0.45
+      "1": 1.4,
+      "3": 1.32,
+      "4": 0.72,
+      "5": 0.55,
+      "7": 0.42
     },
     "degree_weights": {
-      "8": 1.55,
-      "1": 1.35,
-      "0": 1.1,
-      "5": 0.55,
-      "7": 0.45
+      "8": 1.85,
+      "1": 1.65,
+      "0": 1.3,
+      "5": 0.65,
+      "7": 0.52
     },
     "transition_weights": {
-      "0>1": 1.1,
-      "1>4": 1.3,
-      "4>5": 1.0,
-      "5>1": 1.05,
-      "1>0": 1.25,
-      "5>8": 1.1,
-      "8>8": 0.65,
-      "8>7": 1.0,
-      "11>8": 0.7,
-      "8>11": 0.55
+      "5>1": 1.1,
+      "8>8": 0.72
     },
+    "ascending_transition_weights": {
+      "0>1": 1.45,
+      "1>4": 1.65,
+      "4>5": 1.2,
+      "5>7": 0.6,
+      "7>8": 1.1,
+      "8>11": 0.7
+    },
+    "descending_transition_weights": {
+      "11>8": 0.9,
+      "8>7": 1.3,
+      "7>5": 0.7,
+      "5>4": 0.85,
+      "4>1": 1.55,
+      "1>0": 1.7
+    },
+    "trigram_weights": {
+      "0>1>4": 2.1,
+      "1>4>5": 1.75,
+      "5>1>0": 2.1,
+      "4>1>0": 2.35,
+      "11>8>7": 1.35,
+      "8>7>5": 1.45
+    },
+    "preferred_phrases": [
+      {
+        "degrees": [
+          0,
+          1,
+          4,
+          5
+        ],
+        "weight": 2.55
+      },
+      {
+        "degrees": [
+          4,
+          5,
+          1,
+          0
+        ],
+        "weight": 2.5
+      },
+      {
+        "degrees": [
+          11,
+          8,
+          7,
+          5
+        ],
+        "weight": 1.85
+      }
+    ],
     "cadence_degrees": {
-      "0": 1.55,
-      "1": 0.35
-    }
-  },
-  "ornament": {
-    "grace_probability": 0.42,
-    "grace_scale_steps": -1,
-    "grace_fraction": 0.14,
-    "vibrato_cents": 30.0,
-    "vibrato_hz": 4.5,
-    "vibrato_degrees": [
-      1,
-      8
+      "0": 1.9,
+      "1": 0.45
+    },
+    "cadence_patterns": [
+      {
+        "degrees": [
+          1,
+          0
+        ],
+        "weight": 1.7
+      },
+      {
+        "degrees": [
+          4,
+          1,
+          0
+        ],
+        "weight": 2.1
+      },
+      {
+        "degrees": [
+          5,
+          1,
+          0
+        ],
+        "weight": 2.35
+      }
     ]
   },
-  "notes": "12-TET approximation. Bhairav uses komal Re and Dha; Dha is commonly treated as vadi and Re as samvadi, with oscillation on these tones.",
-  "references": [
-    "https://darbar.org/raga/bhairav/"
+  "rhythm": {
+    "enabled": true,
+    "preserve_phrase_duration": true,
+    "quantize_strength": 0.08,
+    "preferred_duration_ratios": [
+      0.5,
+      1.0,
+      1.5,
+      2.0,
+      3.0
+    ],
+    "degree_duration_multipliers": {
+      "1": 1.24,
+      "8": 1.3,
+      "0": 1.18
+    },
+    "phrase_end_multiplier": 1.24,
+    "gap_multiplier": 1.02,
+    "max_duration_change": 0.38
+  },
+  "tuning": {
+    "degree_cents": {
+      "1": -8,
+      "8": -10
+    }
+  },
+  "ornaments": [
+    {
+      "type": "slide_in",
+      "degrees": [
+        1,
+        8
+      ],
+      "probability": 0.46,
+      "scale_steps": -1,
+      "fraction": 0.18,
+      "max_ms": 120
+    },
+    {
+      "type": "grace",
+      "degrees": [
+        4,
+        11
+      ],
+      "probability": 0.24,
+      "scale_steps": -1,
+      "fraction": 0.12,
+      "max_ms": 80
+    },
+    {
+      "type": "vibrato",
+      "degrees": [
+        1,
+        8
+      ],
+      "probability": 0.88,
+      "depth_cents": 34,
+      "rate_hz": 4.3,
+      "delay_fraction": 0.08
+    }
   ],
-  "model_status": "heuristic style-transfer profile; not an authoritative ethnomusicological model"
+  "modulation": {
+    "enabled": false,
+    "options": []
+  },
+  "notes": "12-TET-plus-cents heuristic. Raga-specific arohana/avarohana, nyas, meend, and intonation are simplified."
 }

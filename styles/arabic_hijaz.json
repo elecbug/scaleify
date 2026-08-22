@@ -1,8 +1,8 @@
 {
   "id": "arabic_hijaz",
-  "label": "Arabic Hijaz (12-TET approximation)",
+  "label": "Arabic Hijaz",
   "region": "Arab maqam tradition",
-  "description": "Hijaz-jins-oriented stylization emphasizing 1-b2-3-4 and its reverse, with tonic and fourth-degree emphasis.",
+  "description": "Hijaz-oriented model with 1-b2-3-4 phrase grammar, directional transitions, phrase-level cadence, experimental intonation offsets, and optional phrase-level upper-register modulation.",
   "scale": [
     0,
     1,
@@ -13,60 +13,217 @@
     10
   ],
   "grammar": {
-    "pitch_deviation_weight": 0.9,
-    "motion_preservation_weight": 0.18,
-    "contour_penalty": 0.65,
-    "leap_penalty": 0.07,
+    "pitch_deviation_weight": 0.82,
+    "motion_preservation_weight": 0.14,
+    "contour_penalty": 0.58,
+    "leap_penalty": 0.06,
     "max_preferred_leap": 8,
-    "candidate_shift_semitones": 3.5,
+    "candidate_shift_semitones": 5.0,
     "candidate_count": 7,
     "event_pitch_change": 0.8,
     "min_event_frames": 4,
+    "phrase_gap_ms": 145,
+    "phrase_long_note_factor": 1.65,
+    "phrase_leap_semitones": 8,
+    "min_phrase_events": 3,
     "interval_weights": {
-      "1": 1.65,
-      "2": 0.45,
-      "3": 2.05,
-      "4": 0.55,
-      "5": 0.45
+      "1": 1.85,
+      "2": 0.42,
+      "3": 2.35,
+      "4": 0.52,
+      "5": 0.5
     },
     "degree_weights": {
-      "0": 1.55,
-      "5": 1.0,
-      "4": 0.55,
-      "1": 0.45
+      "0": 1.75,
+      "5": 1.15,
+      "4": 0.68,
+      "1": 0.6
     },
     "transition_weights": {
-      "0>1": 1.55,
-      "1>4": 2.0,
-      "4>5": 1.55,
-      "5>4": 1.35,
-      "4>1": 1.9,
-      "1>0": 1.65,
-      "5>7": 0.6,
-      "7>5": 0.65,
-      "8>7": 0.5
+      "5>7": 0.55,
+      "7>5": 0.62,
+      "8>7": 0.55
     },
+    "ascending_transition_weights": {
+      "0>1": 1.85,
+      "1>4": 2.65,
+      "4>5": 1.9,
+      "5>7": 0.72,
+      "7>8": 0.6,
+      "8>10": 0.62
+    },
+    "descending_transition_weights": {
+      "10>8": 0.65,
+      "8>7": 0.72,
+      "7>5": 0.8,
+      "5>4": 1.7,
+      "4>1": 2.55,
+      "1>0": 2.05
+    },
+    "trigram_weights": {
+      "0>1>4": 3.1,
+      "1>4>5": 2.85,
+      "5>4>1": 2.7,
+      "4>1>0": 3.2,
+      "5>7>8": 0.95,
+      "8>7>5": 1.0
+    },
+    "preferred_phrases": [
+      {
+        "degrees": [
+          0,
+          1,
+          4,
+          5
+        ],
+        "weight": 3.4
+      },
+      {
+        "degrees": [
+          5,
+          4,
+          1,
+          0
+        ],
+        "weight": 3.65
+      },
+      {
+        "degrees": [
+          1,
+          4,
+          5,
+          7
+        ],
+        "weight": 1.6
+      }
+    ],
     "cadence_degrees": {
-      "0": 1.7,
+      "0": 2.0,
       "5": 0.55
-    }
-  },
-  "ornament": {
-    "grace_probability": 0.46,
-    "grace_scale_steps": 1,
-    "grace_fraction": 0.13,
-    "vibrato_cents": 18.0,
-    "vibrato_hz": 5.8,
-    "vibrato_degrees": [
-      1,
-      4,
-      5
+    },
+    "cadence_patterns": [
+      {
+        "degrees": [
+          1,
+          0
+        ],
+        "weight": 1.75
+      },
+      {
+        "degrees": [
+          4,
+          1,
+          0
+        ],
+        "weight": 2.8
+      },
+      {
+        "degrees": [
+          5,
+          4,
+          1,
+          0
+        ],
+        "weight": 3.3
+      }
     ]
   },
-  "notes": "12-TET approximation only. Real Jins Hijaz commonly narrows the notated interval between degrees 2 and 3 through intonational adjustment.",
-  "references": [
-    "https://maqamworld.com/en/jins/hijaz.php",
-    "https://www.maqamworld.com/en/maqam/hijaz.php"
+  "rhythm": {
+    "enabled": true,
+    "preserve_phrase_duration": true,
+    "quantize_strength": 0.18,
+    "preferred_duration_ratios": [
+      0.5,
+      0.75,
+      1.0,
+      1.5,
+      2.0
+    ],
+    "degree_duration_multipliers": {
+      "0": 1.25,
+      "1": 0.92,
+      "4": 1.08,
+      "5": 1.15
+    },
+    "phrase_end_multiplier": 1.25,
+    "gap_multiplier": 0.95,
+    "max_duration_change": 0.34
+  },
+  "tuning": {
+    "degree_cents": {
+      "1": -10,
+      "4": -6,
+      "8": -8
+    }
+  },
+  "ornaments": [
+    {
+      "type": "grace",
+      "degrees": [
+        1,
+        4
+      ],
+      "probability": 0.48,
+      "scale_steps": 1,
+      "fraction": 0.12,
+      "max_ms": 70
+    },
+    {
+      "type": "slide_in",
+      "degrees": [
+        1,
+        4,
+        5
+      ],
+      "probability": 0.34,
+      "scale_steps": -1,
+      "fraction": 0.14,
+      "max_ms": 90
+    },
+    {
+      "type": "slide_out",
+      "degrees": [
+        4,
+        5
+      ],
+      "probability": 0.2,
+      "scale_steps": -1,
+      "fraction": 0.1,
+      "max_ms": 70
+    },
+    {
+      "type": "vibrato",
+      "degrees": [
+        1,
+        4,
+        5
+      ],
+      "probability": 0.58,
+      "depth_cents": 20,
+      "rate_hz": 5.7,
+      "delay_fraction": 0.12
+    }
   ],
-  "model_status": "heuristic style-transfer profile; not an authoritative ethnomusicological model"
+  "modulation": {
+    "enabled": true,
+    "options": [
+      {
+        "name": "upper_nahawand_color",
+        "root_offset": 5,
+        "scale": [
+          0,
+          2,
+          3,
+          5,
+          7,
+          8,
+          10
+        ],
+        "min_phrase_events": 6,
+        "switch_penalty": 3.0,
+        "activation_bonus": 0.35
+      }
+    ]
+  },
+  "notes": "All tuning and modulation values are experimental style-transfer heuristics, not authoritative maqam intonation or sayr rules."
 }

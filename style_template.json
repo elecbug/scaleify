@@ -1,0 +1,67 @@
+{
+  "id": "my_style",
+  "label": "My Style",
+  "region": "Example",
+  "description": "Copy this file and edit only JSON to add a style.",
+  "scale": [0, 2, 4, 7, 9],
+  "grammar": {
+    "pitch_deviation_weight": 0.9,
+    "motion_preservation_weight": 0.25,
+    "contour_penalty": 0.8,
+    "leap_penalty": 0.1,
+    "max_preferred_leap": 7,
+    "candidate_shift_semitones": 4.0,
+    "candidate_count": 6,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "phrase_gap_ms": 150,
+    "phrase_long_note_factor": 1.65,
+    "phrase_leap_semitones": 7,
+    "min_phrase_events": 3,
+    "interval_weights": {"2": 1.0, "3": 1.0},
+    "degree_weights": {"0": 1.0},
+    "transition_weights": {"7>0": 0.8},
+    "ascending_transition_weights": {"0>2": 1.0},
+    "descending_transition_weights": {"2>0": 1.0},
+    "trigram_weights": {"0>2>4": 1.5},
+    "preferred_phrases": [
+      {"degrees": [0, 2, 4, 7], "weight": 2.0}
+    ],
+    "cadence_degrees": {"0": 1.2},
+    "cadence_patterns": [
+      {"degrees": [2, 0], "weight": 1.0}
+    ]
+  },
+  "rhythm": {
+    "enabled": true,
+    "preserve_phrase_duration": true,
+    "quantize_strength": 0.2,
+    "preferred_duration_ratios": [0.5, 1.0, 1.5, 2.0],
+    "degree_duration_multipliers": {"0": 1.2},
+    "phrase_end_multiplier": 1.2,
+    "gap_multiplier": 1.0,
+    "max_duration_change": 0.3
+  },
+  "tuning": {
+    "degree_cents": {"0": 0}
+  },
+  "ornaments": [
+    {"type": "grace", "degrees": [2], "probability": 0.3, "scale_steps": -1, "fraction": 0.12, "max_ms": 70},
+    {"type": "slide_in", "degrees": [7], "probability": 0.2, "scale_steps": -1, "fraction": 0.12, "max_ms": 80},
+    {"type": "vibrato", "degrees": [0], "probability": 0.5, "depth_cents": 18, "rate_hz": 5.0, "delay_fraction": 0.15}
+  ],
+  "modulation": {
+    "enabled": false,
+    "options": [
+      {
+        "name": "alternate_phrase_mode",
+        "root_offset": 5,
+        "scale": [0, 2, 3, 5, 7, 8, 10],
+        "min_phrase_events": 6,
+        "switch_penalty": 3.0,
+        "activation_bonus": 0.0
+      }
+    ]
+  },
+  "notes": "Template. All weights are arbitrary examples."
+}
