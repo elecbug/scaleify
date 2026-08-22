@@ -1,0 +1,203 @@
+{
+  "id": "swedish_dorian_polska",
+  "label": "Swedish Dorian / Polska-inspired",
+  "region": "Sweden / Scandinavia",
+  "description": "Swedish-folk-inspired Dorian profile emphasizing major sixth, tonic/fifth anchors, modal descent, light fiddle ornaments, and restrained uneven-duration lilt.",
+  "scale": [
+    0,
+    2,
+    3,
+    5,
+    7,
+    9,
+    10
+  ],
+  "grammar": {
+    "pitch_deviation_weight": 0.9,
+    "motion_preservation_weight": 0.3,
+    "contour_penalty": 0.88,
+    "leap_penalty": 0.085,
+    "max_preferred_leap": 7,
+    "candidate_shift_semitones": 4.2,
+    "candidate_count": 6,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "phrase_gap_ms": 145,
+    "phrase_long_note_factor": 1.75,
+    "phrase_leap_semitones": 8,
+    "min_phrase_events": 3,
+    "interval_weights": {
+      "2": 1.2,
+      "3": 0.82,
+      "5": 0.78,
+      "7": 0.72
+    },
+    "degree_weights": {
+      "0": 1.45,
+      "7": 1.18,
+      "9": 1.22,
+      "5": 0.72,
+      "10": 0.62
+    },
+    "transition_weights": {
+      "7>9": 1.25,
+      "9>7": 1.25,
+      "7>0": 1.0,
+      "2>0": 0.85,
+      "10>9": 0.82
+    },
+    "ascending_transition_weights": {
+      "0>2": 0.9,
+      "2>3": 0.62,
+      "3>5": 0.82,
+      "5>7": 1.05,
+      "7>9": 1.45,
+      "9>10": 0.62
+    },
+    "descending_transition_weights": {
+      "10>9": 1.0,
+      "9>7": 1.4,
+      "7>5": 1.05,
+      "5>3": 0.85,
+      "3>2": 0.7,
+      "2>0": 1.05
+    },
+    "trigram_weights": {
+      "5>7>9": 1.55,
+      "9>7>5": 1.65,
+      "10>9>7": 1.35,
+      "3>2>0": 1.35,
+      "7>2>0": 1.2
+    },
+    "preferred_phrases": [
+      {
+        "degrees": [
+          0,
+          2,
+          3,
+          5,
+          7,
+          9
+        ],
+        "weight": 1.75
+      },
+      {
+        "degrees": [
+          10,
+          9,
+          7,
+          5,
+          3,
+          2,
+          0
+        ],
+        "weight": 1.95
+      },
+      {
+        "degrees": [
+          5,
+          7,
+          9,
+          7,
+          5
+        ],
+        "weight": 1.7
+      }
+    ],
+    "cadence_degrees": {
+      "0": 1.65,
+      "7": 0.48
+    },
+    "cadence_patterns": [
+      {
+        "degrees": [
+          2,
+          0
+        ],
+        "weight": 1.25
+      },
+      {
+        "degrees": [
+          7,
+          2,
+          0
+        ],
+        "weight": 1.45
+      },
+      {
+        "degrees": [
+          9,
+          7,
+          0
+        ],
+        "weight": 1.25
+      }
+    ]
+  },
+  "rhythm": {
+    "enabled": true,
+    "preserve_phrase_duration": true,
+    "quantize_strength": 0.34,
+    "preferred_duration_ratios": [
+      0.5,
+      0.75,
+      1.0,
+      1.25,
+      1.5,
+      2.0
+    ],
+    "degree_duration_multipliers": {
+      "0": 1.2,
+      "7": 1.08,
+      "9": 1.05
+    },
+    "phrase_end_multiplier": 1.23,
+    "gap_multiplier": 0.9,
+    "max_duration_change": 0.3
+  },
+  "tuning": {
+    "degree_cents": {}
+  },
+  "ornaments": [
+    {
+      "type": "grace",
+      "degrees": [
+        2,
+        5,
+        7,
+        9
+      ],
+      "probability": 0.3,
+      "scale_steps": -1,
+      "fraction": 0.08,
+      "max_ms": 48
+    },
+    {
+      "type": "slide_in",
+      "degrees": [
+        9,
+        10
+      ],
+      "probability": 0.18,
+      "scale_steps": -1,
+      "fraction": 0.1,
+      "max_ms": 60
+    },
+    {
+      "type": "vibrato",
+      "degrees": [
+        0,
+        7
+      ],
+      "probability": 0.22,
+      "depth_cents": 9,
+      "rate_hz": 5.0,
+      "delay_fraction": 0.22
+    }
+  ],
+  "modulation": {
+    "enabled": false,
+    "options": []
+  },
+  "notes": "Dorian/Polska-inspired approximation. The current rhythm engine cannot represent true three-beat polska meter or bowing asymmetry."
+}

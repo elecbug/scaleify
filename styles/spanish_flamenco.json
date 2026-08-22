@@ -1,0 +1,210 @@
+{
+  "id": "spanish_flamenco",
+  "label": "Spanish Flamenco",
+  "region": "Spain / Andalusia",
+  "description": "Flamenco-inspired Major-Phrygian heuristic with flat second, flexible minor/major third, strong b2-to-tonic resolution, descending cadential motion, slides, and vocal-like vibrato.",
+  "scale": [
+    0,
+    1,
+    3,
+    4,
+    5,
+    7,
+    8,
+    10
+  ],
+  "grammar": {
+    "pitch_deviation_weight": 0.82,
+    "motion_preservation_weight": 0.2,
+    "contour_penalty": 0.7,
+    "leap_penalty": 0.075,
+    "max_preferred_leap": 7,
+    "candidate_shift_semitones": 4.5,
+    "candidate_count": 8,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "phrase_gap_ms": 145,
+    "phrase_long_note_factor": 1.7,
+    "phrase_leap_semitones": 8,
+    "min_phrase_events": 3,
+    "interval_weights": {
+      "1": 1.8,
+      "2": 0.65,
+      "3": 1.65,
+      "4": 0.7,
+      "5": 0.45
+    },
+    "degree_weights": {
+      "0": 1.6,
+      "1": 1.25,
+      "4": 1.0,
+      "3": 0.62,
+      "5": 0.58,
+      "7": 0.55
+    },
+    "transition_weights": {
+      "1>0": 2.2,
+      "4>1": 1.55,
+      "3>1": 1.35,
+      "5>3": 1.05,
+      "5>4": 0.8
+    },
+    "ascending_transition_weights": {
+      "0>1": 1.2,
+      "1>4": 1.75,
+      "1>3": 1.05,
+      "3>4": 1.15,
+      "4>5": 0.75,
+      "5>7": 0.6
+    },
+    "descending_transition_weights": {
+      "8>7": 0.9,
+      "7>5": 0.85,
+      "5>4": 1.2,
+      "5>3": 1.35,
+      "4>1": 1.9,
+      "3>1": 1.65,
+      "1>0": 2.35
+    },
+    "trigram_weights": {
+      "0>1>4": 1.85,
+      "1>4>5": 1.35,
+      "5>4>1": 2.05,
+      "5>3>1": 2.2,
+      "4>1>0": 2.75,
+      "3>1>0": 2.7
+    },
+    "preferred_phrases": [
+      {
+        "degrees": [
+          0,
+          1,
+          4,
+          5
+        ],
+        "weight": 1.95
+      },
+      {
+        "degrees": [
+          5,
+          4,
+          1,
+          0
+        ],
+        "weight": 2.75
+      },
+      {
+        "degrees": [
+          5,
+          3,
+          1,
+          0
+        ],
+        "weight": 3.0
+      }
+    ],
+    "cadence_degrees": {
+      "0": 1.95,
+      "1": 0.35
+    },
+    "cadence_patterns": [
+      {
+        "degrees": [
+          1,
+          0
+        ],
+        "weight": 2.25
+      },
+      {
+        "degrees": [
+          4,
+          1,
+          0
+        ],
+        "weight": 2.8
+      },
+      {
+        "degrees": [
+          3,
+          1,
+          0
+        ],
+        "weight": 2.75
+      },
+      {
+        "degrees": [
+          5,
+          3,
+          1,
+          0
+        ],
+        "weight": 3.2
+      }
+    ]
+  },
+  "rhythm": {
+    "enabled": true,
+    "preserve_phrase_duration": true,
+    "quantize_strength": 0.18,
+    "preferred_duration_ratios": [
+      0.5,
+      0.75,
+      1.0,
+      1.5,
+      2.0
+    ],
+    "degree_duration_multipliers": {
+      "0": 1.18,
+      "1": 0.94,
+      "4": 1.04
+    },
+    "phrase_end_multiplier": 1.2,
+    "gap_multiplier": 0.93,
+    "max_duration_change": 0.24
+  },
+  "tuning": {
+    "degree_cents": {}
+  },
+  "ornaments": [
+    {
+      "type": "slide_in",
+      "degrees": [
+        1,
+        3,
+        4
+      ],
+      "probability": 0.38,
+      "scale_steps": -1,
+      "fraction": 0.14,
+      "max_ms": 85
+    },
+    {
+      "type": "grace",
+      "degrees": [
+        1,
+        4
+      ],
+      "probability": 0.34,
+      "scale_steps": 1,
+      "fraction": 0.1,
+      "max_ms": 60
+    },
+    {
+      "type": "vibrato",
+      "degrees": [
+        0,
+        4,
+        7
+      ],
+      "probability": 0.58,
+      "depth_cents": 20,
+      "rate_hz": 5.4,
+      "delay_fraction": 0.18
+    }
+  ],
+  "modulation": {
+    "enabled": false,
+    "options": []
+  },
+  "notes": "Mixed minor/major third is intentional. This models melodic color only, not palo-specific compas or guitar harmony."
+}
