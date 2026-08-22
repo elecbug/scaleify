@@ -50,5 +50,12 @@ python3 scaleify.py test/erika_test.wav --style swedish_dorian_polska --root G -
 ```sh
 python3 generator/dataset/japan_1892_dataset_generator.py
 python3 train_style.py dataset/japan/ --output data/styles_tuned
+
 python3 scaleify.py test/erika_test.wav --style japan_cluster_1 --style-dir data/styles_tuned/ --root G --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
+python3 scaleify.py test/erika_test.wav --style japan_cluster_2 --style-dir data/styles_tuned/ --root G --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
+python3 scaleify.py test/erika_test.wav --style japan_cluster_3 --style-dir data/styles_tuned/ --root G --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
+
+python3 scaleify.py test/korobeiniki_test.wav --style japan_cluster_1 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre pluck
+python3 scaleify.py test/korobeiniki_test.wav --style japan_cluster_2 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre pluck
+python3 scaleify.py test/korobeiniki_test.wav --style japan_cluster_3 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre pluck
 ```
