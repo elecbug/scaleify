@@ -1,0 +1,72 @@
+{
+  "id": "indian_bhairav",
+  "label": "Hindustani Bhairav (12-TET approximation)",
+  "region": "North India",
+  "description": "Bhairav-oriented stylization using komal Re and Dha, emphasizing those degrees and common Bhairav phrase fragments.",
+  "scale": [
+    0,
+    1,
+    4,
+    5,
+    7,
+    8,
+    11
+  ],
+  "grammar": {
+    "pitch_deviation_weight": 0.9,
+    "motion_preservation_weight": 0.18,
+    "contour_penalty": 0.65,
+    "leap_penalty": 0.08,
+    "max_preferred_leap": 8,
+    "candidate_shift_semitones": 3.5,
+    "candidate_count": 7,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "interval_weights": {
+      "1": 1.25,
+      "3": 1.2,
+      "4": 0.65,
+      "5": 0.5,
+      "7": 0.45
+    },
+    "degree_weights": {
+      "8": 1.55,
+      "1": 1.35,
+      "0": 1.1,
+      "5": 0.55,
+      "7": 0.45
+    },
+    "transition_weights": {
+      "0>1": 1.1,
+      "1>4": 1.3,
+      "4>5": 1.0,
+      "5>1": 1.05,
+      "1>0": 1.25,
+      "5>8": 1.1,
+      "8>8": 0.65,
+      "8>7": 1.0,
+      "11>8": 0.7,
+      "8>11": 0.55
+    },
+    "cadence_degrees": {
+      "0": 1.55,
+      "1": 0.35
+    }
+  },
+  "ornament": {
+    "grace_probability": 0.42,
+    "grace_scale_steps": -1,
+    "grace_fraction": 0.14,
+    "vibrato_cents": 30.0,
+    "vibrato_hz": 4.5,
+    "vibrato_degrees": [
+      1,
+      8
+    ]
+  },
+  "notes": "12-TET approximation. Bhairav uses komal Re and Dha; Dha is commonly treated as vadi and Re as samvadi, with oscillation on these tones.",
+  "references": [
+    "https://darbar.org/raga/bhairav/"
+  ],
+  "model_status": "heuristic style-transfer profile; not an authoritative ethnomusicological model"
+}

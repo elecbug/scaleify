@@ -1,0 +1,47 @@
+{
+  "id": "neutral_major",
+  "label": "Neutral Major",
+  "region": "Reference",
+  "description": "Comparison profile with minimal melodic-grammar bias.",
+  "scale": [
+    0,
+    2,
+    4,
+    5,
+    7,
+    9,
+    11
+  ],
+  "grammar": {
+    "pitch_deviation_weight": 1.0,
+    "motion_preservation_weight": 0.55,
+    "contour_penalty": 1.2,
+    "leap_penalty": 0.15,
+    "max_preferred_leap": 7,
+    "candidate_shift_semitones": 3.0,
+    "candidate_count": 5,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "interval_weights": {
+      "2": 0.15,
+      "1": 0.05
+    },
+    "degree_weights": {
+      "0": 0.2,
+      "7": 0.1
+    },
+    "transition_weights": {},
+    "cadence_degrees": {
+      "0": 0.35
+    }
+  },
+  "ornament": {
+    "grace_probability": 0.0,
+    "grace_scale_steps": 0,
+    "grace_fraction": 0.0,
+    "vibrato_cents": 0.0,
+    "vibrato_hz": 5.0,
+    "vibrato_degrees": []
+  },
+  "notes": "Reference only; not intended as a cultural style model."
+}

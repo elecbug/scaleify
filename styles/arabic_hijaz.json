@@ -1,0 +1,72 @@
+{
+  "id": "arabic_hijaz",
+  "label": "Arabic Hijaz (12-TET approximation)",
+  "region": "Arab maqam tradition",
+  "description": "Hijaz-jins-oriented stylization emphasizing 1-b2-3-4 and its reverse, with tonic and fourth-degree emphasis.",
+  "scale": [
+    0,
+    1,
+    4,
+    5,
+    7,
+    8,
+    10
+  ],
+  "grammar": {
+    "pitch_deviation_weight": 0.9,
+    "motion_preservation_weight": 0.18,
+    "contour_penalty": 0.65,
+    "leap_penalty": 0.07,
+    "max_preferred_leap": 8,
+    "candidate_shift_semitones": 3.5,
+    "candidate_count": 7,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "interval_weights": {
+      "1": 1.65,
+      "2": 0.45,
+      "3": 2.05,
+      "4": 0.55,
+      "5": 0.45
+    },
+    "degree_weights": {
+      "0": 1.55,
+      "5": 1.0,
+      "4": 0.55,
+      "1": 0.45
+    },
+    "transition_weights": {
+      "0>1": 1.55,
+      "1>4": 2.0,
+      "4>5": 1.55,
+      "5>4": 1.35,
+      "4>1": 1.9,
+      "1>0": 1.65,
+      "5>7": 0.6,
+      "7>5": 0.65,
+      "8>7": 0.5
+    },
+    "cadence_degrees": {
+      "0": 1.7,
+      "5": 0.55
+    }
+  },
+  "ornament": {
+    "grace_probability": 0.46,
+    "grace_scale_steps": 1,
+    "grace_fraction": 0.13,
+    "vibrato_cents": 18.0,
+    "vibrato_hz": 5.8,
+    "vibrato_degrees": [
+      1,
+      4,
+      5
+    ]
+  },
+  "notes": "12-TET approximation only. Real Jins Hijaz commonly narrows the notated interval between degrees 2 and 3 through intonational adjustment.",
+  "references": [
+    "https://maqamworld.com/en/jins/hijaz.php",
+    "https://www.maqamworld.com/en/maqam/hijaz.php"
+  ],
+  "model_status": "heuristic style-transfer profile; not an authoritative ethnomusicological model"
+}

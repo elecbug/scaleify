@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-scaleify_fullmix_v7.py
+scaleify_fullmix_v8.py
 
 Full-mix experimental scale stylizer.
 
@@ -19,7 +19,7 @@ Why this exists
 ---------------
 Previous versions used short independent phase-vocoder pitch shifts. That can
 produce phasiness/interference while changing the musical character only a
-little. v7 instead synthesizes a clean target-pitch layer from the detected
+little. v8 synthesizes a clean target-pitch layer from the detected
 melodic contour.
 
 Limitations
@@ -36,190 +36,18 @@ import argparse
 import csv
 import subprocess
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
 import librosa
 import numpy as np
 import soundfile as sf
+from style_profiles import (StyleProfile, allowed_midi_notes,
+                            load_style_profiles, map_melody_viterbi)
 
 NOTE_NAMES = [
     "C", "C#", "D", "D#", "E", "F",
     "F#", "G", "G#", "A", "A#", "B",
 ]
-
-SCALES: dict[str, list[int]] = {
-    # ------------------------------------------------------------
-    # Western diatonic modes and common minor forms
-    # ------------------------------------------------------------
-    "major": [0, 2, 4, 5, 7, 9, 11],
-    "ionian": [0, 2, 4, 5, 7, 9, 11],
-    "natural_minor": [0, 2, 3, 5, 7, 8, 10],
-    "aeolian": [0, 2, 3, 5, 7, 8, 10],
-    "harmonic_minor": [0, 2, 3, 5, 7, 8, 11],
-    "melodic_minor": [0, 2, 3, 5, 7, 9, 11],
-    "dorian": [0, 2, 3, 5, 7, 9, 10],
-    "phrygian": [0, 1, 3, 5, 7, 8, 10],
-    "lydian": [0, 2, 4, 6, 7, 9, 11],
-    "mixolydian": [0, 2, 4, 5, 7, 9, 10],
-    "locrian": [0, 1, 3, 5, 6, 8, 10],
-
-    # ------------------------------------------------------------
-    # Pentatonic, blues, synthetic, and symmetric scales
-    # ------------------------------------------------------------
-    "major_pentatonic": [0, 2, 4, 7, 9],
-    "minor_pentatonic": [0, 3, 5, 7, 10],
-    "blues": [0, 3, 5, 6, 7, 10],
-    "whole_tone": [0, 2, 4, 6, 8, 10],
-    "octatonic_wh": [0, 2, 3, 5, 6, 8, 9, 11],
-    "octatonic_hw": [0, 1, 3, 4, 6, 7, 9, 10],
-    "hungarian_minor": [0, 2, 3, 6, 7, 8, 11],
-    "double_harmonic": [0, 1, 4, 5, 7, 8, 11],
-    "neapolitan_minor": [0, 1, 3, 5, 7, 8, 11],
-    "lydian_dominant": [0, 2, 4, 6, 7, 9, 10],
-    "enigmatic": [0, 1, 4, 6, 8, 10, 11],
-
-    # ------------------------------------------------------------
-    # Chinese pentatonic modes, represented in 12-TET
-    # ------------------------------------------------------------
-    "chinese": [0, 2, 4, 7, 9],
-    "chinese_gong": [0, 2, 4, 7, 9],
-    "chinese_shang": [0, 2, 5, 7, 10],
-    "chinese_jue": [0, 3, 5, 8, 10],
-    "chinese_zhi": [0, 2, 5, 7, 9],
-    "chinese_yu": [0, 3, 5, 7, 10],
-
-    # ------------------------------------------------------------
-    # Japanese pentatonic pitch-set approximations
-    # Naming/formulas vary by source and modal rotation.
-    # ------------------------------------------------------------
-    "japanese_in": [0, 1, 5, 7, 8],
-    "japanese_yo": [0, 2, 5, 7, 9],
-    "hirajoshi_12tet": [0, 2, 3, 7, 8],
-    "in_sen_12tet": [0, 1, 5, 7, 10],
-    "iwato_12tet": [0, 1, 5, 6, 10],
-    "kumoi_12tet": [0, 2, 3, 7, 9],
-
-    # ------------------------------------------------------------
-    # Korean mode approximations
-    # ------------------------------------------------------------
-    "korean_pyeongjo": [0, 2, 5, 7, 9],
-    "korean_gyemyeonjo_approx": [0, 3, 5, 7, 10],
-
-    # ------------------------------------------------------------
-    # Arabic / Middle Eastern 12-TET approximations
-    # Quarter-tones and maqam melodic pathways are not represented.
-    # ------------------------------------------------------------
-    "arabic_hijaz": [0, 1, 4, 5, 7, 8, 10],
-    "phrygian_dominant": [0, 1, 4, 5, 7, 8, 10],
-    "maqam_ajam_12tet": [0, 2, 4, 5, 7, 9, 11],
-    "maqam_kurd_12tet": [0, 1, 3, 5, 7, 8, 10],
-    "maqam_nahawand_12tet": [0, 2, 3, 5, 7, 8, 10],
-    "maqam_nikriz_12tet": [0, 2, 3, 6, 7, 9, 10],
-    "maqam_nawa_athar_12tet": [0, 2, 3, 6, 7, 8, 11],
-    "maqam_zanjaran_12tet": [0, 1, 4, 5, 7, 9, 10],
-    "hijazkar_12tet": [0, 1, 4, 5, 7, 8, 11],
-
-    # ------------------------------------------------------------
-    # Hindustani thaat/raga pitch-set approximations
-    # Raga-specific ascent, descent, vadi/samvadi, and phrases are omitted.
-    # ------------------------------------------------------------
-    "indian_bhairav": [0, 1, 4, 5, 7, 8, 11],
-    "indian_bhairavi": [0, 1, 3, 5, 7, 8, 10],
-    "indian_kafi": [0, 2, 3, 5, 7, 9, 10],
-    "indian_khamaj": [0, 2, 4, 5, 7, 9, 10],
-    "indian_kalyan": [0, 2, 4, 6, 7, 9, 11],
-    "indian_marwa": [0, 1, 4, 6, 7, 9, 11],
-    "indian_purvi": [0, 1, 4, 6, 7, 8, 11],
-    "indian_todi": [0, 1, 3, 6, 7, 8, 11],
-
-    # ------------------------------------------------------------
-    # Gamelan-inspired coarse 12-TET approximations
-    # Real slendro/pelog tunings vary by ensemble and are not 12-TET.
-    # ------------------------------------------------------------
-    "slendro_approx": [0, 2, 5, 7, 9],
-    "pelog_approx": [0, 1, 3, 7, 8],
-}
-
-
-
-@dataclass(frozen=True)
-class StyleRule:
-    grace_probability: float
-    grace_scale_steps: int
-    grace_fraction: float
-    vibrato_cents: float
-    vibrato_hz: float
-
-
-# Deliberately stylized heuristics, not authentic performance models.
-# Scales not listed here use DEFAULT_STYLE_RULE instead of failing.
-DEFAULT_STYLE_RULE = StyleRule(
-    grace_probability=0.12,
-    grace_scale_steps=+1,
-    grace_fraction=0.10,
-    vibrato_cents=5.0,
-    vibrato_hz=5.2,
-)
-
-STYLE_RULES: dict[str, StyleRule] = {
-    # Neutral / Western
-    "major": StyleRule(0.00, 0, 0.00, 0.0, 0.0),
-    "ionian": StyleRule(0.00, 0, 0.00, 0.0, 0.0),
-    "natural_minor": StyleRule(0.08, -1, 0.08, 4.0, 5.0),
-    "harmonic_minor": StyleRule(0.18, -1, 0.10, 7.0, 5.2),
-    "melodic_minor": StyleRule(0.10, +1, 0.08, 5.0, 5.0),
-    "blues": StyleRule(0.32, -1, 0.12, 18.0, 5.4),
-    "hungarian_minor": StyleRule(0.28, -1, 0.12, 14.0, 5.3),
-    "double_harmonic": StyleRule(0.35, -1, 0.12, 13.0, 5.4),
-
-    # Chinese
-    "chinese": StyleRule(0.35, +1, 0.14, 10.0, 5.0),
-    "chinese_gong": StyleRule(0.35, +1, 0.14, 10.0, 5.0),
-    "chinese_shang": StyleRule(0.32, -1, 0.13, 10.0, 5.0),
-    "chinese_jue": StyleRule(0.38, +1, 0.14, 11.0, 5.1),
-    "chinese_zhi": StyleRule(0.30, -1, 0.13, 9.0, 5.0),
-    "chinese_yu": StyleRule(0.36, -1, 0.15, 12.0, 4.9),
-
-    # Japanese
-    "japanese_in": StyleRule(0.55, -1, 0.16, 7.0, 5.4),
-    "japanese_yo": StyleRule(0.30, +1, 0.13, 6.0, 5.2),
-    "hirajoshi_12tet": StyleRule(0.52, -1, 0.16, 8.0, 5.4),
-    "in_sen_12tet": StyleRule(0.58, -1, 0.17, 8.0, 5.5),
-    "iwato_12tet": StyleRule(0.48, +1, 0.15, 7.0, 5.3),
-    "kumoi_12tet": StyleRule(0.42, -1, 0.14, 7.0, 5.2),
-
-    # Korean
-    "korean_pyeongjo": StyleRule(0.38, -1, 0.18, 22.0, 4.6),
-    "korean_gyemyeonjo_approx": StyleRule(0.46, -1, 0.20, 28.0, 4.4),
-
-    # Arabic / Middle Eastern approximations
-    "arabic_hijaz": StyleRule(0.50, +1, 0.13, 18.0, 5.8),
-    "phrygian_dominant": StyleRule(0.46, +1, 0.13, 16.0, 5.7),
-    "maqam_kurd_12tet": StyleRule(0.34, -1, 0.13, 15.0, 5.6),
-    "maqam_nahawand_12tet": StyleRule(0.30, +1, 0.12, 14.0, 5.5),
-    "maqam_nikriz_12tet": StyleRule(0.44, +1, 0.13, 18.0, 5.7),
-    "maqam_nawa_athar_12tet": StyleRule(0.48, -1, 0.14, 19.0, 5.8),
-    "maqam_zanjaran_12tet": StyleRule(0.48, +1, 0.13, 18.0, 5.8),
-    "hijazkar_12tet": StyleRule(0.52, -1, 0.14, 18.0, 5.8),
-
-    # Indian approximations
-    "indian_bhairav": StyleRule(0.45, -1, 0.15, 28.0, 5.0),
-    "indian_bhairavi": StyleRule(0.42, -1, 0.15, 26.0, 5.0),
-    "indian_kafi": StyleRule(0.38, +1, 0.14, 24.0, 5.0),
-    "indian_khamaj": StyleRule(0.36, -1, 0.14, 22.0, 5.1),
-    "indian_kalyan": StyleRule(0.40, +1, 0.15, 24.0, 5.1),
-    "indian_marwa": StyleRule(0.44, -1, 0.15, 27.0, 5.0),
-    "indian_purvi": StyleRule(0.46, -1, 0.16, 28.0, 5.0),
-    "indian_todi": StyleRule(0.48, -1, 0.16, 30.0, 4.9),
-
-    # Gamelan-inspired approximations
-    "slendro_approx": StyleRule(0.22, +1, 0.12, 8.0, 5.0),
-    "pelog_approx": StyleRule(0.32, -1, 0.14, 9.0, 5.1),
-}
-
-
-
 
 MAJOR_PROFILE = np.array([
     6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
@@ -468,19 +296,6 @@ def separate_with_demucs(
     )
 
 
-def allowed_midi_notes(
-    root_pc: int,
-    intervals: list[int],
-    low: int = 0,
-    high: int = 127,
-) -> np.ndarray:
-    pcs = {(root_pc + x) % 12 for x in intervals}
-    return np.asarray(
-        [note for note in range(low, high + 1) if note % 12 in pcs],
-        dtype=np.int16,
-    )
-
-
 def nearest_allowed_vector(
     midi: np.ndarray,
     allowed: np.ndarray,
@@ -570,7 +385,7 @@ def fill_short_unvoiced_gaps(
 def apply_style_ornaments(
     target_midi: np.ndarray,
     allowed: np.ndarray,
-    style: str,
+    profile: StyleProfile,
     style_amount: float,
     seed: int,
     hop_length: int,
@@ -581,7 +396,7 @@ def apply_style_ornaments(
     adjacent scale tone. This is a deliberately simple stylization rule.
     """
     result = target_midi.copy()
-    rule = STYLE_RULES.get(style, DEFAULT_STYLE_RULE)
+    rule = profile.ornament
 
     if style_amount <= 0 or rule.grace_scale_steps == 0:
         return result
@@ -650,7 +465,7 @@ def extract_target_pitch(
     stem: np.ndarray,
     sr: int,
     root_pc: int,
-    style: str,
+    profile: StyleProfile,
     fmin_note: str,
     fmax_note: str,
     hop_length: int,
@@ -763,8 +578,13 @@ def extract_target_pitch(
     source_midi[voiced] = librosa.hz_to_midi(f0[voiced])
     source_midi = median_smooth_pitch(source_midi, smoothing_frames)
 
-    allowed = allowed_midi_notes(root_pc, SCALES[style])
-    target_midi = nearest_allowed_vector(source_midi, allowed)
+    allowed = allowed_midi_notes(root_pc, profile.scale)
+    target_midi = map_melody_viterbi(
+        source_midi=source_midi,
+        root_pc=root_pc,
+        profile=profile,
+        style_amount=style_amount,
+    )
 
     max_gap_frames = max(
         0,
@@ -779,7 +599,7 @@ def extract_target_pitch(
     target_midi = apply_style_ornaments(
         target_midi,
         allowed=allowed,
-        style=style,
+        profile=profile,
         style_amount=style_amount,
         seed=seed,
         hop_length=hop_length,
@@ -834,7 +654,8 @@ def target_midi_to_frequency(
     n_samples: int,
     sr: int,
     hop_length: int,
-    style: str,
+    root_pc: int,
+    profile: StyleProfile,
     style_amount: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -876,15 +697,25 @@ def target_midi_to_frequency(
     # Sharpen a little while retaining smooth consonant/note transitions.
     mask = np.clip((mask - 0.20) / 0.65, 0.0, 1.0)
 
-    rule = STYLE_RULES.get(style, DEFAULT_STYLE_RULE)
+    rule = profile.ornament
 
     if rule.vibrato_cents > 0 and style_amount > 0:
         t = np.arange(n_samples, dtype=np.float64) / sr
+        degree_mask = np.ones(n_samples, dtype=np.float64)
+
+        if rule.vibrato_degrees:
+            degrees = (np.rint(midi_sample).astype(np.int16) - root_pc) % 12
+            degree_mask = np.isin(
+                degrees,
+                np.asarray(rule.vibrato_degrees, dtype=np.int16),
+            ).astype(np.float64)
+
         cents = (
             rule.vibrato_cents
             * style_amount
             * np.sin(2.0 * np.pi * rule.vibrato_hz * t)
             * mask
+            * degree_mask
         )
         midi_sample = midi_sample + cents / 100.0
 
@@ -942,7 +773,8 @@ def synthesize_scale_layer(
     sr: int,
     target_midi: np.ndarray,
     voiced_strength: np.ndarray,
-    style: str,
+    root_pc: int,
+    profile: StyleProfile,
     style_amount: float,
     hop_length: int,
     timbre: str,
@@ -961,7 +793,8 @@ def synthesize_scale_layer(
         n_samples=n_samples,
         sr=sr,
         hop_length=hop_length,
-        style=style,
+        root_pc=root_pc,
+        profile=profile,
         style_amount=style_amount,
     )
 
@@ -1072,7 +905,7 @@ def transform_stem(
     stem: np.ndarray,
     sr: int,
     root_pc: int,
-    style: str,
+    profile: StyleProfile,
     stem_name: str,
     hop_length: int,
     voiced_threshold: float,
@@ -1098,7 +931,7 @@ def transform_stem(
         stem=stem,
         sr=sr,
         root_pc=root_pc,
-        style=style,
+        profile=profile,
         fmin_note=fmin_note,
         fmax_note=fmax_note,
         hop_length=hop_length,
@@ -1115,7 +948,8 @@ def transform_stem(
         sr=sr,
         target_midi=target_midi,
         voiced_strength=voiced_strength,
-        style=style,
+        root_pc=root_pc,
+        profile=profile,
         style_amount=style_amount,
         hop_length=hop_length,
         timbre=timbre,
@@ -1139,15 +973,28 @@ def parse_stems(value: str) -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Demucs + pYIN full-mix target-scale stylizer."
+        description="Demucs + YIN/pYIN + external-profile Viterbi melodic stylizer."
     )
 
-    parser.add_argument("input", type=Path)
+    parser.add_argument("input", type=Path, nargs="?")
 
     parser.add_argument(
         "--style",
-        required=True,
-        choices=list(SCALES),
+        default=None,
+        help="External style profile id.",
+    )
+
+    parser.add_argument(
+        "--style-dir",
+        type=Path,
+        default=Path(__file__).resolve().parent / "styles",
+        help="Directory containing JSON style profiles.",
+    )
+
+    parser.add_argument(
+        "--list-styles",
+        action="store_true",
+        help="List available style profiles and exit.",
     )
 
     parser.add_argument(
@@ -1198,7 +1045,7 @@ def main() -> None:
         "--style-amount",
         type=float,
         default=0.75,
-        help="Ornament/vibrato amount, 0..1.",
+        help="Melodic-grammar + ornament strength, 0..1.",
     )
 
     parser.add_argument(
@@ -1280,6 +1127,30 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    profiles = load_style_profiles(args.style_dir)
+
+    if args.list_styles:
+        print(f"Style directory: {args.style_dir}")
+        for style_id, item in sorted(profiles.items()):
+            print(f"  {style_id:20s}  {item.label} [{item.region}]")
+        return
+
+    if args.input is None:
+        parser.error("input is required unless --list-styles is used")
+
+    if args.style is None:
+        parser.error("--style is required")
+
+    if args.style not in profiles:
+        available = ", ".join(sorted(profiles))
+        parser.error(f"unknown style '{args.style}'. Available: {available}")
+
+    profile = profiles[args.style]
+    print(
+        f"Style profile: {profile.id} | {profile.label} | "
+        f"region={profile.region} | scale={list(profile.scale)}"
+    )
+
     if not 0.0 <= args.style_amount <= 1.0:
         parser.error("--style-amount must be between 0 and 1")
 
@@ -1333,7 +1204,7 @@ def main() -> None:
             continue
 
         print(
-            f"Stylizing stem={stem_name}, style={args.style}, "
+            f"Stylizing stem={stem_name}, style={profile.id}, "
             f"mode={args.mix_mode}, pitch={args.pitch_method} ..."
         )
 
@@ -1341,7 +1212,7 @@ def main() -> None:
             stem=processed_stems[stem_name],
             sr=sr,
             root_pc=root_pc,
-            style=args.style,
+            profile=profile,
             stem_name=stem_name,
             hop_length=args.hop_length,
             voiced_threshold=args.voiced_threshold,
@@ -1360,7 +1231,7 @@ def main() -> None:
 
         report_path = (
             args.report_dir
-            / f"{args.input.stem}_{stem_name}_{args.style}.csv"
+            / f"{args.input.stem}_{stem_name}_{profile.id}.csv"
         )
         write_pitch_report(
             report_path,
@@ -1383,7 +1254,7 @@ def main() -> None:
 
     output_path = args.output or (
         args.input.parent
-        / f"{args.input.stem}_{args.style}_v7.wav"
+        / f"{args.input.stem}_{profile.id}_v8.wav"
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

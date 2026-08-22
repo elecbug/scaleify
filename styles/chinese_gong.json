@@ -1,0 +1,64 @@
+{
+  "id": "chinese_gong",
+  "label": "Chinese Gong Pentatonic",
+  "region": "China",
+  "description": "Gong-mode pentatonic stylization emphasizing major-second/minor-third motion and tonic/fifth stability.",
+  "scale": [
+    0,
+    2,
+    4,
+    7,
+    9
+  ],
+  "grammar": {
+    "pitch_deviation_weight": 0.95,
+    "motion_preservation_weight": 0.28,
+    "contour_penalty": 0.85,
+    "leap_penalty": 0.1,
+    "max_preferred_leap": 7,
+    "candidate_shift_semitones": 3.5,
+    "candidate_count": 6,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "interval_weights": {
+      "2": 1.25,
+      "3": 1.45,
+      "5": 0.45,
+      "7": 0.35
+    },
+    "degree_weights": {
+      "0": 1.2,
+      "7": 0.75,
+      "9": 0.35
+    },
+    "transition_weights": {
+      "0>2": 0.6,
+      "2>4": 0.6,
+      "4>7": 0.75,
+      "7>9": 0.55,
+      "9>7": 0.55,
+      "7>4": 0.75,
+      "4>2": 0.6,
+      "2>0": 0.75,
+      "7>0": 0.55,
+      "0>7": 0.4
+    },
+    "cadence_degrees": {
+      "0": 1.2,
+      "7": 0.45
+    }
+  },
+  "ornament": {
+    "grace_probability": 0.28,
+    "grace_scale_steps": 1,
+    "grace_fraction": 0.12,
+    "vibrato_cents": 9.0,
+    "vibrato_hz": 5.0,
+    "vibrato_degrees": []
+  },
+  "notes": "Heuristic profile. Gong mode is represented as 1-2-3-5-6 in 12-TET.",
+  "references": [
+    "https://sites.google.com/nyu.edu/theoryandpractice1/course-content/unit-2-scales-pitch-collections/pentatonic-whole-tone-octatonic"
+  ],
+  "model_status": "heuristic style-transfer profile; not an authoritative ethnomusicological model"
+}

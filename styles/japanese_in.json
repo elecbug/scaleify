@@ -1,0 +1,68 @@
+{
+  "id": "japanese_in",
+  "label": "Japanese In",
+  "region": "Japan",
+  "description": "In-scale stylization emphasizing semitone and fourth-related nuclear-tone motion.",
+  "scale": [
+    0,
+    1,
+    5,
+    7,
+    8
+  ],
+  "grammar": {
+    "pitch_deviation_weight": 0.95,
+    "motion_preservation_weight": 0.22,
+    "contour_penalty": 0.75,
+    "leap_penalty": 0.08,
+    "max_preferred_leap": 7,
+    "candidate_shift_semitones": 3.5,
+    "candidate_count": 7,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "interval_weights": {
+      "1": 1.75,
+      "2": 0.75,
+      "4": 1.65,
+      "5": 0.55,
+      "7": 0.35
+    },
+    "degree_weights": {
+      "0": 1.25,
+      "5": 0.85,
+      "7": 0.8,
+      "1": 0.4,
+      "8": 0.4
+    },
+    "transition_weights": {
+      "0>1": 1.0,
+      "1>5": 1.15,
+      "5>7": 0.85,
+      "7>8": 0.95,
+      "8>7": 0.95,
+      "7>5": 0.85,
+      "5>1": 1.15,
+      "1>0": 1.1,
+      "0>5": 0.7,
+      "5>0": 0.8,
+      "7>0": 0.65
+    },
+    "cadence_degrees": {
+      "0": 1.35,
+      "7": 0.55
+    }
+  },
+  "ornament": {
+    "grace_probability": 0.48,
+    "grace_scale_steps": -1,
+    "grace_fraction": 0.15,
+    "vibrato_cents": 7.0,
+    "vibrato_hz": 5.4,
+    "vibrato_degrees": []
+  },
+  "notes": "Heuristic 12-TET profile based on the In/Miyako-bushi pitch set 1-b2-4-5-b6.",
+  "references": [
+    "https://en.wikipedia.org/wiki/In_scale"
+  ],
+  "model_status": "heuristic style-transfer profile; not an authoritative ethnomusicological model"
+}
