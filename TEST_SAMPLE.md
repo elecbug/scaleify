@@ -59,3 +59,9 @@ python3 scaleify.py test/korobeiniki_test.wav --style japan_cluster_1 --style-di
 python3 scaleify.py test/korobeiniki_test.wav --style japan_cluster_2 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
 python3 scaleify.py test/korobeiniki_test.wav --style japan_cluster_3 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
 ```
+
+```sh
+python3 generator/dataset/korea_traditional_dataset_generator.py
+python3 train_style.py dataset/korea/ --output data/styles_tuned
+
+```

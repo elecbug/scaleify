@@ -8,4 +8,3 @@ venv/
 
 !generator/dataset/
 !generator/test/
-!test/test.md
