@@ -51,6 +51,9 @@ python3 scaleify.py test/erika_test.wav --style swedish_dorian_polska --root G -
 python3 generator/dataset/japan_1892_dataset_generator.py
 python3 train_style.py dataset/japan/ --output data/styles_tuned
 
+rm -rf data/styles_tuned/*.csv
+rm -rf data/styles_tuned/*_report.json
+
 python3 scaleify.py test/erika_test.wav --style japan_cluster_1 --style-dir data/styles_tuned/ --root G --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
 python3 scaleify.py test/erika_test.wav --style japan_cluster_2 --style-dir data/styles_tuned/ --root G --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
 python3 scaleify.py test/erika_test.wav --style japan_cluster_3 --style-dir data/styles_tuned/ --root G --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
@@ -64,4 +67,12 @@ python3 scaleify.py test/korobeiniki_test.wav --style japan_cluster_3 --style-di
 python3 generator/dataset/korea_traditional_dataset_generator.py
 python3 train_style.py dataset/korea/ --output data/styles_tuned
 
+rm -rf data/styles_tuned/*.csv
+rm -rf data/styles_tuned/*_report.json
+
+python3 scaleify.py test/erika_test.wav --style korea_cluster_1 --style-dir data/styles_tuned/ --root G --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
+python3 scaleify.py test/erika_test.wav --style korea_cluster_2 --style-dir data/styles_tuned/ --root G --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
+
+python3 scaleify.py test/korobeiniki_test.wav --style korea_cluster_1 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
+python3 scaleify.py test/korobeiniki_test.wav --style korea_cluster_2 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
 ```
