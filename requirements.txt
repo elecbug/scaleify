@@ -1,4 +1,5 @@
 librosa>=0.11
-numpy
-soundfile
+numpy>=1.26
+requests>=2.31
+soundfile>=0.12
 imageio-ffmpeg

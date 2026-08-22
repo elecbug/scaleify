@@ -1,6 +1,11 @@
 data/*
+dataset/*
 test/*
 reports/*
+
 __pycache__/
 venv/
+
+!generator/dataset/
+!generator/test/
 !test/test.md
