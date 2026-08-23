@@ -54,8 +54,8 @@ def main():
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("blind_test"),
-        help="Output directory (default: blind_test)",
+        default=Path("results/blind_test"),
+        help="Output directory (default: results/blind_test)",
     )
 
     parser.add_argument(
