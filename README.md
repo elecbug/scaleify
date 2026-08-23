@@ -1,320 +1,221 @@
-# Scaleify v9
+# Scaleify
 
-`v9` is a **monophonic melodic style-transfer prototype**. Feed it an isolated melody, solo instrument, vocal melody, or another predominantly monophonic file.
+Scaleify is an experimental framework for **melodic style extraction and transfer**.
 
-## Pipeline
+It analyzes predominantly monophonic melodies, learns recurring melodic characteristics from a corpus, and applies those characteristics to another melody.
+
+The project originally started as a scale-based cultural style-transfer prototype, but has gradually evolved toward **unsupervised corpus-driven melodic modeling**.
+
+## What Scaleify models
+
+Scaleify currently focuses on melodic characteristics such as:
+
+- pitch-class usage
+- preferred intervals
+- ascending / descending transitions
+- short recurring melodic patterns
+- phrase endings and cadence tendencies
+- relative note durations
+- optional ornaments and microtuning
+
+It does not model full musical style.
+
+In particular, harmony, accompaniment, lyrics, singer identity, instrumentation, and production style are outside the current scope.
+
+## Basic workflow
+
+A typical experiment consists of:
 
 ```text
-MP3/WAV/FLAC
-  -> decode
-  -> YIN / pYIN F0
-  -> note events
-  -> phrase segmentation
-  -> higher-order Viterbi grammar
-       - scale constraint
-       - degree preference
-       - interval preference
-       - direction-aware transitions
-       - trigrams
-       - preferred 4/5-note phrases
-       - phrase cadence
-       - optional phrase-level modulation
-  -> rhythm rewrite
-  -> degree-conditioned grace/slide/vibrato
-  -> optional degree microtuning
-  -> clean synthesis
-  -> WAV + event CSV + metrics JSON
+melody corpus
+    ↓
+unsupervised style learning
+    ↓
+melodic style profile
+    ↓
+target melody
+    ↓
+style transfer
+    ↓
+transformed melody
 ```
 
-## Included styles
+Scaleify can work with manually written style profiles, but the current research direction primarily uses profiles learned directly from corpora.
 
-The package includes a deliberately small set of cultural/experimental profiles:
-
-- `chinese_gong`
-- `japanese_in`
-- `korean_pyeongjo`
-- `arabic_hijaz`
-- `indian_bhairav`
-- `irish_dorian`
-- `spanish_flamenco`
-- `hungarian_minor`
-- `swedish_dorian_polska`
-- `neutral_major` (reference)
-
-The European profiles are intentionally narrow experiments rather than national summaries.
-For example, `irish_dorian` targets Dorian-colored Irish tune behavior, while
-`swedish_dorian_polska` is a Dorian/Polska-inspired engineering approximation.
-
-List them with:
-
-```bash
-python scaleify.py --list-styles
-```
-
-## Install
+## Installation
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-`imageio-ffmpeg` is only the robust decoder fallback for formats such as MP3.
+## Style transfer
 
-## Basic use
-
-```bash
-python scaleify.py test.wav \
-  --style japanese_in \
-  --root C \
-  --style-amount 0.9 \
-  --rhythm-amount 0.8 \
-  --timbre pluck
-```
-
-For `Erika` generated in G major, for example:
+Example:
 
 ```bash
-python scaleify.py test/erika_test.wav \
-  --style arabic_hijaz \
-  --root G \
-  --style-amount 0.9 \
-  --timbre reed
+python scaleify.py melody.wav \
+    --style japan_cluster_1 \
+    --root C \
+    --style-amount 0.9 \
+    --rhythm-amount 0.55 \
+    --timbre reed
 ```
 
 Automatic root estimation is also supported:
 
 ```bash
-python scaleify.py melody.mp3 --style chinese_gong --root auto
+python scaleify.py melody.wav \
+    --style japan_cluster_1 \
+    --root auto
 ```
 
-## Feature switches
+## Corpus-driven training
 
-```bash
---no-rhythm
---no-ornaments
---no-microtuning
---no-modulation
-```
-
-This makes ablation tests straightforward.
-
-## Reports
-
-Each run produces:
-
-```text
-reports/<input>_<style>_events.csv
-reports/<input>_<style>_metrics.json
-```
-
-The metrics JSON contains:
-
-- mean / median / maximum pitch displacement
-- melody preservation score
-- contour preservation score
-- scale compliance
-- preferred interval score
-- direction-aware transition score
-- trigram / phrase score
-- cadence score
-- aggregate grammar score
-- preferred phrase hit count
-- rhythm-change magnitude
-- modulation phrase count
-
-These are **engineering diagnostics**, not perceptual or musicological ground truth.
-
-## External style profiles
-
-All culture-specific behavior lives under `styles/*.json`. Python does not need to be edited to add a style. Copy `styles/template.json`, change `id`, and tune the profile.
-
-### `scale`
-
-Semitone offsets from the selected root in 12-TET.
-
-```json
-"scale": [0, 1, 5, 7, 8]
-```
-
-### `grammar`
-
-Important fields:
-
-```json
-"interval_weights": {"1": 1.8, "4": 1.6},
-"degree_weights": {"0": 1.3, "5": 0.8},
-"ascending_transition_weights": {"0>1": 1.4},
-"descending_transition_weights": {"1>0": 1.5},
-"trigram_weights": {"0>1>5": 2.0},
-"preferred_phrases": [
-  {"degrees": [0, 1, 5, 7], "weight": 2.2}
-],
-"cadence_patterns": [
-  {"degrees": [5, 1, 0], "weight": 2.0}
-]
-```
-
-The DP state retains recent target-note history, so trigrams and short multi-note phrases affect the selected melody rather than being applied only after rendering.
-
-### `rhythm`
-
-Rhythm is transformed at note-event level. It can quantize relative durations, hold structural degrees longer, alter gaps, and extend phrase endings. With `preserve_phrase_duration=true`, local rhythm changes do not change the total phrase length.
-
-### `ornaments`
-
-Supported types:
-
-- `grace`
-- `slide_in`
-- `slide_out`
-- `vibrato`
-
-Rules can be restricted to particular scale degrees.
-
-### `tuning`
-
-Optional degree-specific cent offsets:
-
-```json
-"tuning": {
-  "degree_cents": {"1": -10, "4": -6}
-}
-```
-
-The shipped non-zero values are deliberately conservative **experimental stylization parameters**, not authoritative intonation tables.
-
-### `modulation`
-
-Phrase-level alternate roots/scales can be declared externally:
-
-```json
-"modulation": {
-  "enabled": true,
-  "options": [
-    {
-      "name": "alternate_mode",
-      "root_offset": 5,
-      "scale": [0, 2, 3, 5, 7, 8, 10],
-      "min_phrase_events": 6,
-      "switch_penalty": 3.0,
-      "activation_bonus": 0.3
-    }
-  ]
-}
-```
-
-For each detected phrase, the mapper compares the base style and allowed modulation candidates and chooses the lower-cost path. This is a generic engineering abstraction; it is not a complete maqam/raga modulation model.
-
-## Important limitation
-
-The included profiles are heuristic style-transfer models. A culture or tradition cannot be reduced to one scale or one JSON file. The profiles intentionally focus on a few audible cues for experimentation: scale-degree use, melodic transition statistics, phrase endings, rhythm, ornaments, and tuning.
-
-## Onset-aware repeated-note segmentation (v9.1)
-
-Pitch changes alone cannot distinguish repeated equal-pitch notes such as
-`C C | G G | A A`. v9.1 therefore combines F0 segmentation with an onset
-/re-attack detector. A new note event begins when either the tracked pitch
-changes enough or a sufficiently separated onset is detected.
-
-Relevant CLI options:
-
-```bash
---onset-delta 0.15
---onset-min-separation-ms 70
---onset-retrigger-min-ms 80
---no-onset-segmentation
-```
-
-- `--onset-delta`: higher values are more conservative. For clean synthetic
-  melody tests, about `0.10` to `0.20` is a useful range.
-- `--onset-min-separation-ms`: minimum spacing between attack candidates.
-- `--onset-retrigger-min-ms`: a detected onset cannot split a note until the
-  current note is at least this old. This prevents the initial attack from
-  splitting a single note into two events.
-- `--no-onset-segmentation`: restores the old F0-change-only behavior for
-  ablation/debugging.
-
-Regression check with the bundled/generated Twinkle melody:
-
-- old F0-only segmentation: 24 detected events
-- onset-aware segmentation: 42 detected events
-
-The expected melody contains 42 pitched notes.
-
-
-## Corpus-driven style tuning
-
-`train_style.py` updates an existing style profile from every WAV file in a
-folder. The source JSON is never overwritten.
-
-```bash
-python train_style.py styles/japanese_in.json corpus/japanese
-```
-
-Default output:
-
-```text
-styles/japanese_in_tuned.json
-styles/japanese_in_tuned_training_report.json
-```
-
-If `japanese_in_tuned.json` already exists, the trainer creates
-`japanese_in_tuned_2.json`, then `_3`, etc. The output profile also receives a
-new style `id`, so the original and tuned JSON can stay in the same `styles/`
-directory without duplicate-ID errors.
-
-Explicit output:
-
-```bash
-python train_style.py \
-    styles/japanese_in.json \
-    corpus/japanese \
-    --output styles/japanese_in_corpus.json
-```
-
-The trainer learns target-corpus statistics for degree/interval weights,
-direction-aware transitions, trigrams, recurring 4/5-note phrases, cadence
-behavior, relative note-duration patterns, and optional degree-specific
-microtuning. It preserves transform-safety parameters, ornaments and modulation
-policy because those cannot be inferred reliably from target WAVs alone.
-
-For best results, use monophonic or melody-dominant WAV files.
-
-
-# v10: unsupervised corpus trainer
-
-The trainer no longer requires an input style JSON.
+The current trainer can infer style profiles directly from a folder of melodies.
 
 ```bash
 python train_style.py dataset/japan
 ```
 
-Default output:
+The trainer performs unsupervised clustering and learns a separate melodic profile for each discovered cluster.
 
-```text
-styles/generated/
-├── japan_cluster_1.json
-├── japan_cluster_2.json
-├── ...
-├── japan_cluster_assignments.csv
-└── japan_cluster_report.json
-```
+Learned properties include:
 
-The number of clusters is selected automatically by NumPy k-means +
-silhouette score:
+* core pitch-class vocabulary
+* auxiliary pitch classes
+* interval statistics
+* transition statistics
+* recurring short phrases
+* cadence behavior
+* rhythm tendencies
+
+The number of clusters can be selected automatically or specified manually.
 
 ```bash
 python train_style.py dataset/japan --clusters auto
 ```
 
-Or force a count:
-
 ```bash
 python train_style.py dataset/japan --clusters 3
 ```
 
-The generated styles infer their own scale. Notes outside the inferred scale
-are excluded from melodic grammar and break n-gram runs. Equal-note re-attacks
-remain in rhythm statistics but are excluded from melodic transition weights.
-Cadence patterns require both minimum occurrence count and cross-file support.
+## Pitch vocabulary
 
-No ornament or modulation rules are invented automatically.
+Early Scaleify versions assumed that a style could be represented by a relatively small musical scale.
+
+This worked reasonably well for several traditional-music corpora, where compact 5–7 note structures often explained most of the melodic material.
+
+Modern corpora exposed a limitation of this assumption.
+
+For example, recent Vocaloid experiments required approximately 9–10 pitch classes to explain more than 90% of the melody events.
+
+For this reason, the current `scale` representation is better interpreted more generally as a **core pitch-class vocabulary** when working with chromatic modern music.
+
+## Experimental corpora
+
+Current experiments include corpora related to:
+
+* Japanese traditional music
+* Korean traditional music
+* Chinese traditional music
+* JSMel
+* modern Vocaloid / DECO*27 melodies
+
+These datasets are used to study whether the same unsupervised representation can recover both compact traditional pitch structures and broader modern melodic vocabularies.
+
+The resulting profiles describe the training corpus only. They should not be interpreted as complete representations of a country, culture, genre, or historical period.
+
+## Vocaloid experiment
+
+Scaleify includes an experimental workflow for symbolic singing-synth melodies.
+
+The current corpus primarily uses officially distributed DECO*27 / OTOIRO melody data.
+
+Only the monophonic vocal melody is modeled. Lyrics, voicebank characteristics, tuning curves, accompaniment, and production are intentionally excluded.
+
+Despite this restriction, preliminary listening tests suggest that corpus-derived profiles can introduce melodic behavior that listeners may associate with modern Vocaloid composition.
+
+This remains a perceptual research question rather than a validated conclusion.
+
+## Listening tests
+
+Several familiar melodies are currently used as test material, including:
+
+* Erika
+* Korobeiniki
+* Twinkle Twinkle Little Star
+
+Using familiar source melodies makes it easier to compare how strongly different learned profiles alter the perceived melodic character.
+
+For formal experiments, transformed files should be presented blindly and randomized.
+
+One planned evaluation asks listeners to select the transformation that feels most familiar, then compares those choices with their prior exposure to musical traditions or Vocaloid music.
+
+## Diagnostics
+
+Scaleify produces numerical metrics for properties such as:
+
+* pitch displacement
+* contour preservation
+* interval preference
+* transition consistency
+* phrase-pattern matching
+* cadence behavior
+* rhythm modification
+
+These metrics are intended as engineering diagnostics.
+
+They are not measures of cultural authenticity or perceptual quality.
+
+## Project evolution
+
+Scaleify has progressed roughly through the following stages:
+
+```text
+handcrafted scale/style profiles
+        ↓
+onset-aware melody extraction
+        ↓
+corpus tuning of existing profiles
+        ↓
+fully unsupervised style learning
+        ↓
+core + auxiliary pitch vocabulary
+        ↓
+traditional and modern corpus comparison
+```
+
+The current research question is no longer simply:
+
+> Can a melody be converted to a predefined cultural scale?
+
+Instead, it is closer to:
+
+> Can recurring melodic characteristics be learned from a corpus and transferred to another melody in a perceptually meaningful way?
+
+## Limitations
+
+Scaleify is still a research prototype.
+
+Important limitations include:
+
+* melody-only modeling
+* dependence on corpus quality
+* imperfect tonic estimation
+* audio transcription errors
+* heuristic cluster-count selection
+* limited modeling of chromatic and modulating music
+* no formal perceptual validation yet
+
+The system should therefore be treated as an experimental tool for studying melodic representation and transfer, not as an automatic classifier of musical cultures.
+
+## Future work
+
+Current directions include:
+
+* direct symbolic-data training
+* improved cluster selection and stability analysis
+* better chromatic pitch modeling
+* larger modern-music corpora
+* producer-level melodic comparison
+* formal blind listening studies

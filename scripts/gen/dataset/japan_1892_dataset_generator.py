@@ -88,7 +88,7 @@ import soundfile as sf
 
 
 SR = 44100
-DEFAULT_OUTPUT = Path("dataset/japan")
+DEFAULT_OUTPUT = Path("datasets/japan")
 ARCHIVE_URL = "https://www.daisyfield.com/music/htm/-genres/japan.htm"
 COLLECTION_TITLE = "Japanese Popular Music"
 COLLECTION_YEAR = 1892

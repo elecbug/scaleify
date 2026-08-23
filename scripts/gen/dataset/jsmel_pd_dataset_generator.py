@@ -127,7 +127,7 @@ ZENODO_LANDING = f"https://zenodo.org/records/{ZENODO_RECORD_ID}"
 JSMEL_DOI = "10.5281/zenodo.20078158"
 PAPER_DOI = "10.1016/j.dib.2026.112869"
 
-DEFAULT_OUTPUT = Path("dataset/japan_jsmel")
+DEFAULT_OUTPUT = Path("datasets/japan_jsmel")
 DEFAULT_SR = 44100
 DEFAULT_BPM = 100.0
 DEFAULT_GAP_MS = 18.0

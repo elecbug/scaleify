@@ -1413,7 +1413,7 @@ def main() -> None:
         default=Path("vocaloid_sources"),
         help="Folder containing VSQX/USTX/UST/MIDI files.",
     )
-    parser.add_argument("--output", type=Path, default=Path("dataset/vocaloid"))
+    parser.add_argument("--output", type=Path, default=Path("datasets/vocaloid"))
     parser.add_argument(
         "--sources-csv",
         type=Path,

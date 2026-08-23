@@ -1,6 +1,6 @@
 data/*
-dataset/*
-test/*
+datasets/*
+results/*
 reports/*
 
 __pycache__/

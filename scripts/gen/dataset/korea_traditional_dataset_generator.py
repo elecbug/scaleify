@@ -1,61 +1,43 @@
 #!/usr/bin/env python3
 """
-china_traditional_dataset_generator.py
+korea_traditional_dataset_generator.py
 
-Build a neutral monophonic Chinese traditional/folk-song WAV corpus.
+Build a neutral monophonic Korean traditional-song WAV corpus.
 
 Primary source
 --------------
 Music Laboratory / World Traditional Songs:
-https://www.mu-tech.org/WorldTrad/index_chinese_song.html
+https://www.mu-tech.org/WorldTrad/index_korean_song.html
+
+The source site provides Korean traditional-song score pages and downloadable
+MIDI files. Its terms state that most free folk/traditional-song data is based
+on anonymous or copyright-expired works, and that traditional/arranged MIDI,
+MP3 and MP4 files may be used freely for non-commercial purposes.
 
 Terms:
-https://www.mu-tech.org/Traditional/TermsOfService.html
+https://mu-tech.org/Traditional/TermsOfService.html
 
-The source index provides sheet-music pages and downloadable MIDI for a broad
-set of Chinese folk songs. The site's terms say most free folk/traditional
-material is anonymous or out of copyright and allow non-commercial use/editing
-of traditional/arranged MIDI, but prohibit redistribution of the data (including
-edited data) as sound-material packs.
+IMPORTANT
+---------
+This generator does NOT render the source accompaniment/arrangement.
 
-Therefore this generator is intended to create a LOCAL research corpus. Do not
-redistribute the downloaded MIDI or generated WAV corpus without separately
-clearing rights.
-
-Why not render the source MIDI directly?
-----------------------------------------
-The site states that accompaniment for most songs is automatically arranged.
-Scaleify is trying to learn melodic grammar rather than a particular arranger's
-harmony/instrumentation. This generator therefore:
+The site's downloadable MIDI often contains automatically generated
+accompaniment. To avoid teaching Scaleify the arranger's harmony/timbre rather
+than Korean melodic grammar, this script:
 
     source MIDI
-        -> identify the most likely melody track
-        -> reduce that track to a single monophonic line
-        -> discard accompaniment/program/instrument data
-        -> render every song with the SAME neutral synthetic timbre
-        -> dataset/china/*.wav
+        -> choose likely melody track
+        -> reduce that track to one monophonic pitch at a time
+        -> discard programs/instruments/accompaniment
+        -> render all songs with the SAME neutral synthetic timbre
+        -> dataset/korea/*.wav
 
-Curated scope
--------------
-The default set is intentionally broad across historical Qing/Ming-Qing material
-and regional Chinese folk traditions. It excludes:
-- obvious modern named-composer songs,
-- Beijing de jinshan shang (modern revolutionary-song history),
-- Yimeng shan xiaodiao (20th-century composition/arrangement history),
-- Daolaki (Korean ethnic-group Doraji, to avoid cross-country duplicate),
-- Caoyuan qingge (catalogued as Kazakhstan),
-- nursery-rhyme/lullaby section entries,
-- a few modern/uncertain adaptation cases.
+The generated WAV corpus is therefore intended for non-commercial research and
+experimentation unless you separately verify broader rights for your use case.
 
-This is a country-level seed corpus, not a claim that all included regional and
-ethnic traditions form one homogeneous musical system.
-
-Usage
------
-    python china_traditional_dataset_generator.py
-    python china_traditional_dataset_generator.py --list
-    python china_traditional_dataset_generator.py --song molihua
-    python china_traditional_dataset_generator.py --force
+Default output
+--------------
+dataset/korea/
 
 Dependencies
 ------------
@@ -63,6 +45,32 @@ numpy
 requests
 soundfile
 mido
+
+Usage
+-----
+Generate the curated corpus:
+
+    python korea_traditional_dataset_generator.py
+
+List included songs:
+
+    python korea_traditional_dataset_generator.py --list
+
+Generate one song:
+
+    python korea_traditional_dataset_generator.py --song jindo_arirang
+
+Force source MIDI re-download and WAV regeneration:
+
+    python korea_traditional_dataset_generator.py --force
+
+Notes
+-----
+- Modern composed songs, national anthems and most children's songs listed on
+  the source index are deliberately excluded.
+- Two regional "Gaegori Taryeong" entries are retained independently.
+- The source index/transliterations contain occasional romanization/metadata
+  errors. The original source URL is stored for every output.
 """
 
 from __future__ import annotations
@@ -72,8 +80,8 @@ import csv
 import html
 import json
 import math
+import re
 import time
-import unicodedata
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -86,18 +94,17 @@ import soundfile as sf
 
 
 SR = 44100
-DEFAULT_OUTPUT = Path("dataset/china")
-INDEX_URL = "https://www.mu-tech.org/WorldTrad/index_chinese_song.html"
-TERMS_URL = "https://www.mu-tech.org/Traditional/TermsOfService.html"
+DEFAULT_OUTPUT = Path("datasets/korea")
+INDEX_URL = "https://www.mu-tech.org/WorldTrad/index_korean_song.html"
+TERMS_URL = "https://mu-tech.org/Traditional/TermsOfService.html"
 DEFAULT_RENDER_BPM = 100.0
 DEFAULT_GAP_MS = 18.0
 
 RIGHTS_NOTE = (
-    "Music Laboratory terms: most free folk/traditional data is described as "
-    "anonymous or copyright-expired; traditional/arranged MIDI may be used and "
-    "edited for non-commercial purposes. The terms prohibit redistribution of "
-    "the data or edited data as sound material. Verify rights independently for "
-    "commercial/public redistribution."
+    "Traditional/folk source. Music Laboratory terms describe most free "
+    "traditional-song material as anonymous/copyright-expired and permit "
+    "non-commercial use of traditional/arranged MIDI data. Verify separately "
+    "before commercial use or redistribution."
 )
 
 
@@ -106,55 +113,65 @@ class SongSpec:
     id: str
     anchor: str
     title: str
-    title_zh: str
+    title_ko: str
     region: str
-    era: str = ""
     occurrence: int = 0
     note: str = ""
 
 
-# 35-song broad country-level seed corpus.
+# Curated traditional/folk subset from the source site's Korean index.
+# Modern named-composer songs, national anthems, obvious imported songs and
+# most nursery-rhyme material are intentionally omitted.
 SONGS: tuple[SongSpec, ...] = (
-    SongSpec("jiu_lianhuan", "Jiu lianhuan", "Nine Chain", "九連環", "China", "Qing"),
-    SongSpec("soan_min_kyo", "Soan Min Kyo", "Fortune-telling Song", "算命曲", "China", "Qing"),
-    SongSpec("haha_diao", "Haha Diao", "Ha-ha-laugh", "哈哈調", "China", "Ming-Qing"),
-    SongSpec("fengyang_huagu", "Feng yang huagu", "Fengyang Flower Drum", "鳳陽花鼓", "Anhui", "Qing"),
-    SongSpec("sasho", "Sasho", "Gauze Window", "紗窓", "China", "Qing"),
-    SongSpec("molihua", "Molihua", "Jasmine Flower", "茉莉花", "Jiangsu", "Qing"),
+    SongSpec("doraji", "Dolaji", "Doraji Taryeong", "도라지타령", "Korea"),
+    SongSpec("gyeonggi_arirang", "Gyoenggido Arirang", "Gyeonggi Arirang", "경기도 아리랑", "Gyeonggi"),
+    SongSpec("gin_arirang", "Gin a ri rang", "Gin Arirang", "긴 아리랑", "Gyeonggi"),
+    SongSpec("jindo_arirang", "Jindo Arirang", "Jindo Arirang", "진도 아리랑", "Jeolla"),
+    SongSpec("gangwon_arirang", "Gang won do arirang", "Gangwon-do Arirang", "강원도 아리랑", "Gangwon"),
+    SongSpec("yeongnam_arirang", "Yeungnam arirang", "Yeongnam Arirang", "영남 아리랑", "Yeongnam"),
+    SongSpec("miryang_arirang", "Miryan arirang", "Miryang Arirang", "밀양 아리랑", "Gyeongsang"),
+    SongSpec("seodo_arirang", "SuhDo Arirang", "Seodo Arirang", "서도 아리랑", "Seodo"),
 
-    SongSpec("xiaobaicai", "Xiaobaicai", "Little Cabbage", "小白菜", "Hebei"),
-    SongSpec("xiao_fang_niu", "Xiao fang niu", "Herding Cattle", "小放牛", "Hebei"),
-    SongSpec("dui_hua", "Dui hua", "Flower Play", "对花", "Hebei"),
-    SongSpec("bugu_ge", "Bugu Ge", "Cuckoo's Song", "布谷歌", "Jiangxi"),
-    SongSpec("bian_hualan", "Bian hualan", "Weaving a Flower Basket", "編花籃", "Henan"),
-    SongSpec("wuzhishan_ge", "Wuzhishan ge", "Mount Wuzhi Song", "五指山歌", "China",
-             note="Region metadata varies by source; retained as generic China."),
-    SongSpec("longchuan_diao", "Longchuan diao", "Dragon Boat Song", "龍船調", "Hubei"),
-    SongSpec("cai_binlang", "Cai binlang", "Picking Betel Palm", "採檳榔", "Hunan"),
-    SongSpec("zizhu_diao", "Zizhu diao", "Purple Bamboo Melody", "紫竹调", "China",
-             note="Widely circulated regional tune; kept generic rather than forcing one province."),
-    SongSpec("xiu_hebao", "Xiu hebao", "Embroidering a Pouch", "繍荷包", "Shanxi"),
-    SongSpec("luoshui_tian", "Luoshui tian", "Raining Day", "落水天", "Guangdong/Hakka"),
-    SongSpec("shiliu_qing", "Shiliu qing", "Green Pomegranate", "石榴青", "Guangxi"),
-    SongSpec("fang_ma_shange", "Fang ma shange", "Herdsman's Song", "放馬山歌", "Yunnan"),
-    SongSpec("taihu_chuan", "Tai Hu Chuan", "Taihu Lake Boat", "太湖船", "Jiangsu"),
+    SongSpec("gaetaryeong", "Gae ta ryeong", "Gaetaryeong", "개타령", "Gyeonggi"),
+    SongSpec(
+        "gaegori_taryeong_jeju", "Gae go ri ta ryeong",
+        "Gaegori Taryeong (Jeju)", "개고리타령", "Jeju", occurrence=0
+    ),
+    SongSpec(
+        "gaegori_taryeong_jeolla", "Gae go ri ta ryeong",
+        "Gaegori Taryeong (Jeolla)", "개고리타령", "Jeolla", occurrence=1
+    ),
+    SongSpec("gakseori_taryeong", "Gak seor i ta ryeong", "Gakseori Taryeong", "각설이타령", "Korea"),
+    SongSpec("gayageum_taryeong", "Gayaeum ta ryeong", "Gayageum Taryeong", "가야금타령", "Jeolla"),
+    SongSpec("geondeureong_taryeong", "Geon deu reong ta ryeong", "Geondeureong Taryeong", "건드렁타령", "Gyeonggi"),
+    SongSpec("gunbam_taryeong", "Gun bamta ryeong", "Gunbam Taryeong", "군밤타령", "Gyeonggi"),
+    SongSpec("gyeongbokgung_taryeong", "Gyeong bok gung ta ryeong", "Gyeongbokgung Taryeong", "경복궁타령", "Gyeonggi"),
+    SongSpec("nampo_taryeong", "Nam po ta ryeong", "Nampo Taryeong", "남포타령", "Jeolla"),
+    SongSpec("kkaturi_taryeong", "Kkaturi Taryeong", "Kkaturi Taryeong", "까투리타령", "Jeolla"),
 
-    SongSpec("alamuhan", "Alamuhan", "Alamuhan", "阿拉木汗", "Xinjiang",
-             note="Catalogued by source as Chinese folk song from Xinjiang."),
-    SongSpec("shu_hua", "Shu hua", "Count the Flowers", "数花", "Ningxia"),
-    SongSpec("qiao_qinglang", "Qiao qinglang", "Look at My Fiancé", "瞧情郎", "Liaoning"),
-    SongSpec("jinping_xiaoshan", "Jinping shi de xiaoshan", "A Hill Like a Gold Bottle", "金瓶似的小山", "Tibetan"),
-    SongSpec("ai_ma_lin_ji", "Ai ma lin ji", "Ai Ma Lin Ji", "唉马林几", "Tibet"),
-    SongSpec("huanghe_chuanfu_qu", "Huanghe chuanfu qu", "Yellow River Boatmen's Song", "黄河船夫曲", "Shaanxi"),
-    SongSpec("cai_cha_pu_die", "Cai cha pu die", "Tea Picking and Butterfly Catching", "采茶扑蝶", "Fujian"),
-    SongSpec("shezu_qingge", "Shezu qingge", "She Love Song", "畲族情歌", "Fujian/She"),
-    SongSpec("shan_xian_jun", "Shan xian jun", "Steep Mountain Rise", "山険峻", "Fujian"),
-    SongSpec("kangding_qingge", "Kangding qingge", "Kangding Love Song", "康定情歌", "Sichuan"),
-    SongSpec("shu_hama", "Shu hama", "Counting Toad", "數蛤蟆", "Sichuan"),
-    SongSpec("qingsi_niao", "Qingsi niao", "Qingsi Bird", "青丝鸟", "Zhejiang"),
-    SongSpec("xia_sichuan", "Xia sichuan", "Down to Sichuan", "下四川", "Gansu"),
-    SongSpec("guizhou_shange", "Guizhou shange", "Guizhou Mountain Song", "貴州山歌", "Guizhou"),
-    SongSpec("yonggan_elunchun", "Yonggan de elunchun", "Oroqen Song", "鄂伦春之歌", "Oroqen"),
+    SongSpec("ganggangsullae", "Gang gang su wol rae", "Ganggangsullae", "강강수월래", "Jeolla"),
+    SongSpec("ulsan_agassi", "Ulsan agasi", "Ulsan Agassi", "울산아가씨", "Gyeongsang"),
+    SongSpec("singosan_taryeong", "Shinkosan Taryon", "Singosan Taryeong", "신고산타령", "Hamgyeong"),
+    SongSpec("cheonan_samgeori", "Chonan samugori", "Cheonan Samgeori", "천안삼거리", "Chungcheong"),
+    SongSpec("geomjilmaegi", "Geom jil mae gi", "Geomjilmaegi", "검질매기", "Jeju"),
+    SongSpec("geomundo_baetnorae", "Geo mun do baet no rae", "Geomundo Baetnorae", "거문도뱃노래", "Jeolla"),
+    SongSpec("gim_gyehwa", "Gim gye hwa", "Gim Gyehwa", "김계화", "Jeju"),
+    SongSpec("gungcho_daenggi", "Gung cho daeng gi", "Gungcho Daenggi", "궁초댕기", "Hamgyeong"),
+    SongSpec("gwanghallu", "Gwang han ru", "Gwanghallu", "광한루", "Jeolla"),
+
+    # The source site romanizes this unusually as "Iuccia Paighi" and shows
+    # the characters 六字伯. It is retained under the conventional Korean
+    # research label Yukjabaegi, while preserving the source URL in metadata.
+    SongSpec(
+        "yukjabaegi", "Iuccia Paighi", "Yukjabaegi", "육자배기", "Jeolla",
+        note="Source site uses the romanization 'Iuccia Paighi'."
+    ),
+    SongSpec("nongbuga", "Nongbuga", "Nongbuga", "농부가", "Jeolla"),
+    SongSpec("batgari_taryeong", "Batgal-italyeong", "Batgari Taryeong", "밭갈이타령", "Korean Peninsula"),
+    SongSpec("saeya_saeya_parangsaeya", "Saeyasaeya palangsaeya", "Saeya Saeya Parangsaeya", "새야새야 파랑새야", "Korea"),
+    SongSpec("yangyang_palgyeong", "Yang-yang palgyeong", "Yangyang Palgyeong", "양양팔경", "Gangwon"),
+    SongSpec("geumgangsan_taryeong", "Geum gang san ta ryeong", "Geumgangsan Taryeong", "금강산타령", "Gangwon"),
+    SongSpec("yangsando", "Yangsando", "Yangsando", "양산도", "Korean Peninsula"),
 )
 
 
@@ -211,20 +228,15 @@ class AnchorParser(HTMLParser):
 
 
 def normalize_anchor(text: str) -> str:
-    # Fold pinyin accents: Zǐzhú diào -> zizhu diao.
-    folded = unicodedata.normalize("NFKD", text)
-    ascii_text = "".join(
-        ch for ch in folded
-        if not unicodedata.combining(ch)
-    )
-    return "".join(
-        ch.lower() for ch in ascii_text
-        if ch.isascii() and ch.isalnum()
-    )
+    return "".join(ch.lower() for ch in text if ch.isascii() and ch.isalnum())
 
 
 def decode_page(content: bytes) -> str:
-    for encoding in ("utf-8", "shift_jis", "euc_jp", "gb18030", "big5"):
+    """
+    Preserve all ASCII URLs/romanized link text even if an old page's declared
+    character set is inconsistent.
+    """
+    for encoding in ("utf-8", "shift_jis", "euc_jp", "cp949"):
         try:
             return content.decode(encoding)
         except UnicodeDecodeError:
@@ -232,7 +244,11 @@ def decode_page(content: bytes) -> str:
     return content.decode("latin-1", errors="replace")
 
 
-def fetch(session: requests.Session, url: str, timeout: float) -> bytes:
+def fetch(
+    session: requests.Session,
+    url: str,
+    timeout: float,
+) -> bytes:
     response = session.get(url, timeout=timeout)
     response.raise_for_status()
     return response.content
@@ -264,7 +280,6 @@ def discover_index_pages(
         key = normalize_anchor(anchor.text)
         if not key:
             continue
-
         found.setdefault(key, [])
         if full not in found[key]:
             found[key].append(full)
@@ -280,7 +295,8 @@ def resolve_song_page(
     matches = discovered.get(key, [])
 
     if len(matches) <= spec.occurrence:
-        candidates: list[str] = []
+        # Loose substring fallback for harmless spacing/romanization changes.
+        candidates = []
         for discovered_key, urls in discovered.items():
             if key in discovered_key or discovered_key in key:
                 candidates.extend(urls)
@@ -299,7 +315,7 @@ def extract_midi_links(page_url: str, page_content: bytes) -> list[str]:
     parser = AnchorParser()
     parser.feed(decode_page(page_content))
 
-    links: list[str] = []
+    links = []
     for anchor in parser.anchors:
         href = html.unescape(anchor.href.strip())
         if ".mid" not in href.lower():
@@ -313,6 +329,8 @@ def extract_midi_links(page_url: str, page_content: bytes) -> list[str]:
 def choose_source_midi_url(page_url: str, page_content: bytes) -> str:
     links = extract_midi_links(page_url, page_content)
 
+    # Prefer the site's common "Unplugged" style merely as a stable download
+    # source. Its accompaniment is discarded later.
     for url in links:
         if "_unplugged.mid" in url.lower():
             return url
@@ -320,7 +338,8 @@ def choose_source_midi_url(page_url: str, page_content: bytes) -> str:
     if links:
         return links[0]
 
-    # Fallback for old pages where download controls are dynamically generated.
+    # Some old pages construct download controls dynamically. The source site
+    # uses this stable naming pattern for many WorldTrad pages.
     stem = Path(urlparse(page_url).path).stem
     return (
         "https://www.mu-tech.co.jp/midi/traditional/fsout/"
@@ -340,7 +359,9 @@ def download_source_midi(
 
     data = fetch(session, url, timeout)
     if len(data) < 14 or data[:4] != b"MThd":
-        raise RuntimeError(f"Downloaded file is not a Standard MIDI file: {url}")
+        raise RuntimeError(
+            f"Downloaded file is not a Standard MIDI file: {url}"
+        )
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
@@ -361,7 +382,7 @@ def track_notes(track: mido.MidiTrack) -> tuple[str, list[MidiNote]]:
 
         if not hasattr(msg, "channel"):
             continue
-        if int(msg.channel) == 9:
+        if int(msg.channel) == 9:  # General MIDI drums
             continue
 
         if msg.type == "note_on" and int(msg.velocity) > 0:
@@ -370,6 +391,7 @@ def track_notes(track: mido.MidiTrack) -> tuple[str, list[MidiNote]]:
             continue
 
         if msg.type in ("note_off", "note_on"):
+            # note_on velocity=0 is note-off.
             key = (int(msg.channel), int(msg.note))
             stack = active.get(key)
             if not stack:
@@ -393,22 +415,17 @@ def overlap_monophony(notes: list[MidiNote]) -> float:
         return 1.0
 
     notes = sorted(notes, key=lambda n: (n.start, n.end, n.pitch))
-    overlaps = 0
+    overlap_count = 0
     current_end = notes[0].end
-
     for note in notes[1:]:
         if note.start < current_end:
-            overlaps += 1
+            overlap_count += 1
         current_end = max(current_end, note.end)
 
-    return max(0.0, 1.0 - overlaps / max(1, len(notes) - 1))
+    return max(0.0, 1.0 - overlap_count / max(1, len(notes) - 1))
 
 
-def score_track(
-    index: int,
-    name: str,
-    notes: list[MidiNote],
-) -> TrackCandidate | None:
+def score_track(index: int, name: str, notes: list[MidiNote]) -> TrackCandidate | None:
     if len(notes) < 6:
         return None
 
@@ -424,7 +441,11 @@ def score_track(
     if any(token in name_l for token in ("bass", "chord", "drum", "perc", "伴奏")):
         name_bonus -= 180.0
 
+    # Auto-arrangers commonly put the melody in an early track. Reward that
+    # gently, but let monophony/pitch/count dominate when metadata differs.
     early_bonus = max(0.0, 55.0 - 10.0 * index)
+
+    # Penalize bass-like tracks.
     low_penalty = max(0.0, 52.0 - mean_pitch) * 5.0
 
     score = (
@@ -466,6 +487,7 @@ def select_melody_track(
     if strategy == "first":
         chosen = min(candidates, key=lambda c: c.index)
     elif strategy == "highest":
+        # Among reasonably monophonic candidates, take highest mean register.
         mono = [c for c in candidates if c.monophony >= 0.80]
         chosen = max(mono or candidates, key=lambda c: (c.mean_pitch, c.score))
     else:
@@ -475,6 +497,12 @@ def select_melody_track(
 
 
 def monophonize(notes: list[MidiNote]) -> list[MidiNote]:
+    """
+    Collapse simultaneous pitches to one note and prevent overlapping output.
+
+    Highest pitch wins inside an exact-onset chord, which is a good fallback for
+    melody-track doublings. Ordinary repeated same-pitch attacks are retained.
+    """
     if not notes:
         return []
 
@@ -499,6 +527,7 @@ def monophonize(notes: list[MidiNote]) -> list[MidiNote]:
     for note in chosen:
         if out and note.start < out[-1].end:
             out[-1].end = max(out[-1].start + 1, note.start)
+
         if note.end <= note.start:
             continue
         out.append(note)
@@ -511,6 +540,7 @@ def synth_tone(freq: float, seconds: float, velocity: int) -> np.ndarray:
     t = np.arange(n, dtype=np.float64) / SR
     phase = 2.0 * np.pi * freq * t
 
+    # Same neutral reed-like timbre used for every corpus song.
     y = (
         0.78 * np.sin(phase)
         + 0.15 * np.sin(2.0 * phase)
@@ -566,6 +596,7 @@ def render_melody(
         start_s = note.start * seconds_per_tick
         dur_s = max(seconds_per_tick, (note.end - note.start) * seconds_per_tick)
 
+        # Explicit but small release gap improves repeated-note segmentation.
         note_gap = min(gap_s, dur_s * 0.12)
         tone_s = max(0.018, dur_s - note_gap)
 
@@ -636,9 +667,8 @@ def write_metadata(output: Path, rows: list[dict]) -> None:
         "filename",
         "id",
         "title",
-        "title_zh",
+        "title_ko",
         "region",
-        "era",
         "duration_s",
         "note_events",
         "pitch_min_midi",
@@ -664,13 +694,10 @@ def write_metadata(output: Path, rows: list[dict]) -> None:
 
 
 def list_songs() -> None:
-    print(f"{'#':>2}  {'ID':28} {'REGION':18} {'ERA':10} TITLE")
-    print("-" * 110)
+    print(f"{'#':>2}  {'ID':28} {'REGION':18} TITLE")
+    print("-" * 88)
     for i, song in enumerate(SONGS, start=1):
-        print(
-            f"{i:2d}  {song.id:28} {song.region:18} {song.era:10} "
-            f"{song.title} / {song.title_zh}"
-        )
+        print(f"{i:2d}  {song.id:28} {song.region:18} {song.title} / {song.title_ko}")
 
 
 def write_manifest(
@@ -681,35 +708,15 @@ def write_manifest(
     strategy: str,
 ) -> None:
     payload = {
-        "dataset": "china_traditional_mu_tech",
-        "country": "China",
+        "dataset": "korea_traditional_mu_tech",
+        "country": "Korea",
         "source_index": INDEX_URL,
         "terms_url": TERMS_URL,
         "rights_note": RIGHTS_NOTE,
-        "redistribution_warning": (
-            "The source terms prohibit redistribution of the data or edited "
-            "data as sound material. Keep this generated corpus local unless "
-            "you separately obtain permission/clear rights."
+        "selection": (
+            "Curated traditional/folk subset. Modern named-composer songs, "
+            "anthems, obvious imported songs and most nursery rhymes excluded."
         ),
-        "selection": {
-            "goal": (
-                "Broad country-level traditional melodic seed corpus rather "
-                "than a single regional/mode-specific corpus."
-            ),
-            "included": (
-                "Historical Qing/Ming-Qing and regional folk songs catalogued "
-                "by the source as Chinese folk songs."
-            ),
-            "excluded": [
-                "named-composer modern songs",
-                "Beijing de jinshan shang",
-                "Yimeng shan xiaodiao",
-                "Daolaki (Korean Doraji)",
-                "Caoyuan qingge (Kazakhstan)",
-                "nursery-rhyme/lullaby section",
-                "selected modern/uncertain adaptation cases",
-            ],
-        },
         "rendering": {
             "sample_rate": SR,
             "render_bpm": render_bpm,
@@ -732,7 +739,7 @@ def write_manifest(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Generate a neutral monophonic Chinese traditional-song WAV corpus "
+            "Generate a neutral monophonic Korean traditional-song WAV corpus "
             "from the Music Laboratory WorldTrad MIDI collection."
         )
     )
@@ -740,13 +747,13 @@ def main() -> None:
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT,
-        help="Output directory (default: dataset/china)",
+        help="Output directory (default: dataset/korea)",
     )
     parser.add_argument(
         "--song",
         choices=[s.id for s in SONGS],
         default=None,
-        help="Generate one song only. Default: full curated corpus.",
+        help="Generate only one song. Default: full curated corpus.",
     )
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -754,12 +761,16 @@ def main() -> None:
         "--track-strategy",
         choices=["auto", "first", "highest"],
         default="auto",
+        help="How to choose the likely melody MIDI track.",
     )
     parser.add_argument(
         "--render-bpm",
         type=float,
         default=DEFAULT_RENDER_BPM,
-        help="Neutral fixed render tempo; relative MIDI rhythm is preserved.",
+        help=(
+            "Neutral fixed render tempo. MIDI rhythm ratios are preserved while "
+            "source arrangement tempo is ignored."
+        ),
     )
     parser.add_argument(
         "--articulation-gap-ms",
@@ -805,7 +816,7 @@ def main() -> None:
     failures: list[dict] = []
 
     for i, spec in enumerate(selected, start=1):
-        print(f"[{i:02d}/{len(selected):02d}] {spec.title} / {spec.title_zh}")
+        print(f"[{i:02d}/{len(selected):02d}] {spec.title} / {spec.title_ko}")
 
         try:
             page_url = resolve_song_page(spec, discovered)
@@ -832,6 +843,7 @@ def main() -> None:
                     gap_ms=args.articulation_gap_ms,
                 )
             else:
+                # Re-analyze MIDI for metadata, but do not rewrite audio.
                 midi = mido.MidiFile(midi_path)
                 chosen, candidates = select_melody_track(
                     midi, args.track_strategy
@@ -868,9 +880,8 @@ def main() -> None:
                 "filename": wav_path.name,
                 "id": spec.id,
                 "title": spec.title,
-                "title_zh": spec.title_zh,
+                "title_ko": spec.title_ko,
                 "region": spec.region,
-                "era": spec.era,
                 "duration_s": round(float(analysis["duration_s"]), 3),
                 "note_events": int(analysis["note_events"]),
                 "pitch_min_midi": int(analysis["pitch_min_midi"]),
@@ -902,7 +913,7 @@ def main() -> None:
             failure = {
                 "id": spec.id,
                 "title": spec.title,
-                "title_zh": spec.title_zh,
+                "title_ko": spec.title_ko,
                 "error": f"{type(exc).__name__}: {exc}",
             }
             failures.append(failure)
@@ -926,9 +937,9 @@ def main() -> None:
             encoding="utf-8",
         )
     else:
-        failure_path = output / "failures.json"
-        if failure_path.exists():
-            failure_path.unlink()
+        fail_path = output / "failures.json"
+        if fail_path.exists():
+            fail_path.unlink()
 
     print()
     print("Generation complete")
