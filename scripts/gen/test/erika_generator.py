@@ -23,7 +23,7 @@ SR = 44100
 BPM = 120
 BEAT = 60.0 / BPM
 
-OUTPUT = Path("test/erika_test.wav")
+OUTPUT = Path("results/erika_test.wav")
 
 # Keep these False for clean --no-demucs scale tests.
 ADD_STOMP = False

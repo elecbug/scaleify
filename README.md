@@ -20,27 +20,30 @@ Scaleify currently focuses on melodic characteristics such as:
 
 It does not model full musical style.
 
-In particular, harmony, accompaniment, lyrics, singer identity, instrumentation, and production style are outside the current scope.
+Harmony, accompaniment, lyrics, singer identity, instrumentation, and production style are outside the current scope.
 
-## Basic workflow
+## Repository layout
 
-A typical experiment consists of:
+The main working directories are roughly:
 
 ```text
-melody corpus
-    ↓
-unsupervised style learning
-    ↓
-melodic style profile
-    ↓
-target melody
-    ↓
-style transfer
-    ↓
-transformed melody
+datasets/
+    training corpora
+
+results/
+    generated test audio
+    styles_tuned/
+        learned style profiles
+
+scripts/
+    scaleify.py
+    train_style.py
+    tune_test.sh
+    gen/
+        dataset generators
 ```
 
-Scaleify can work with manually written style profiles, but the current research direction primarily uses profiles learned directly from corpora.
+`tune_test.sh` resolves repository-relative paths automatically.
 
 ## Installation
 
@@ -50,53 +53,54 @@ python -m pip install -r requirements.txt
 
 ## Style transfer
 
-Example:
-
 ```bash
-python scaleify.py melody.wav \
+python3 scripts/scaleify.py results/twinkle_twinkle_test.wav \
     --style japan_cluster_1 \
+    --style-dir results/styles_tuned \
     --root C \
     --style-amount 0.9 \
     --rhythm-amount 0.55 \
     --timbre reed
 ```
 
-Automatic root estimation is also supported:
+Automatic root estimation:
 
 ```bash
-python scaleify.py melody.wav \
+python3 scripts/scaleify.py melody.wav \
     --style japan_cluster_1 \
+    --style-dir results/styles_tuned \
     --root auto
 ```
 
 ## Corpus-driven training
 
-The current trainer can infer style profiles directly from a folder of melodies.
-
 ```bash
-python train_style.py dataset/japan
+python3 scripts/train_style.py datasets/japan \
+    --output results/styles_tuned
 ```
 
-The trainer performs unsupervised clustering and learns a separate melodic profile for each discovered cluster.
-
-Learned properties include:
-
-* core pitch-class vocabulary
-* auxiliary pitch classes
-* interval statistics
-* transition statistics
-* recurring short phrases
-* cadence behavior
-* rhythm tendencies
-
-The number of clusters can be selected automatically or specified manually.
+Automatic clustering:
 
 ```bash
-python train_style.py dataset/japan --clusters auto
+python3 scripts/train_style.py datasets/japan \
+    --output results/styles_tuned \
+    --clusters auto
 ```
 
+Fixed cluster count:
+
 ```bash
-python train_style.py dataset/japan --clusters 3
+python3 scripts/train_style.py datasets/japan \
+    --output results/styles_tuned \
+    --clusters 3
+```
+
+For the Vocaloid corpus:
+
+```bash
+python3 scripts/train_style.py datasets/vocaloid \
+    --output results/styles_tuned \
+    --scale-max-notes 12
 ```
 
 ## Pitch vocabulary
@@ -113,13 +117,19 @@ For this reason, the current `scale` representation is better interpreted more g
 
 ## Experimental corpora
 
-Current experiments include corpora related to:
+Current datasets include experiments related to:
 
 * Japanese traditional music
 * Korean traditional music
 * Chinese traditional music
 * JSMel
 * modern Vocaloid / DECO*27 melodies
+
+Generated corpora are stored below:
+
+```text
+datasets/
+```
 
 These datasets are used to study whether the same unsupervised representation can recover both compact traditional pitch structures and broader modern melodic vocabularies.
 
@@ -133,27 +143,87 @@ The current corpus primarily uses officially distributed DECO*27 / OTOIRO melody
 
 Only the monophonic vocal melody is modeled. Lyrics, voicebank characteristics, tuning curves, accompaniment, and production are intentionally excluded.
 
-Despite this restriction, preliminary listening tests suggest that corpus-derived profiles can introduce melodic behavior that listeners may associate with modern Vocaloid composition.
+For Vocaloid experiments, a broader pitch vocabulary can be allowed during training:
 
-This remains a perceptual research question rather than a validated conclusion.
+```bash
+python3 train_style.py ../datasets/vocaloid \
+    --output ../results/styles_tuned \
+    --scale-max-notes 12
+```
 
 ## Listening tests
 
-Several familiar melodies are currently used as test material, including:
+Current listening-test melodies are stored in `results/`:
 
-* Erika
-* Korobeiniki
-* Twinkle Twinkle Little Star
+```text
+results/
+├── erika_test.wav
+├── korobeiniki_test.wav
+├── twinkle_twinkle_test.wav
+└── styles_tuned/
+```
 
-Using familiar source melodies makes it easier to compare how strongly different learned profiles alter the perceived melodic character.
+Transformed files are also written alongside the corresponding test material.
 
-For formal experiments, transformed files should be presented blindly and randomized.
+Typical output names are:
 
-One planned evaluation asks listeners to select the transformation that feels most familiar, then compares those choices with their prior exposure to musical traditions or Vocaloid music.
+```text
+erika_test_japan_cluster_1_v9_1.wav
+korobeiniki_test_vocaloid_cluster_1_v9_1.wav
+twinkle_twinkle_test_china_cluster_2_v9_1.wav
+```
+
+For formal perceptual experiments, these filenames should be replaced with randomized blind identifiers and the mapping retained separately.
+
+
+## Batch experiment helper
+
+The easiest way to reproduce the current dataset generation, training, and listening-test workflow is:
+
+```bash
+./scripts/tune_test.sh japan
+./scripts/tune_test.sh korea
+./scripts/tune_test.sh china
+./scripts/tune_test.sh jsmel
+./scripts/tune_test.sh vocaloid
+```
+
+Force corpus regeneration:
+
+```bash
+./scripts/tune_test.sh vocaloid --download
+```
+
+Force retraining:
+
+```bash
+./scripts/tune_test.sh vocaloid --training
+```
+
+Force both:
+
+```bash
+./scripts/tune_test.sh vocaloid --download --training
+```
+
+Run all configured corpora:
+
+```bash
+./scripts/tune_test.sh all
+```
+
+The helper uses:
+
+```text
+datasets/               corpus data
+results/                listening-test audio
+results/styles_tuned/   trained style profiles
+scripts/gen/            dataset generators
+```
 
 ## Diagnostics
 
-Scaleify produces numerical metrics for properties such as:
+Scaleify produces numerical diagnostics for properties such as:
 
 * pitch displacement
 * contour preservation
@@ -163,33 +233,27 @@ Scaleify produces numerical metrics for properties such as:
 * cadence behavior
 * rhythm modification
 
-These metrics are intended as engineering diagnostics.
-
-They are not measures of cultural authenticity or perceptual quality.
+These values are engineering diagnostics, not measures of cultural authenticity or perceptual quality.
 
 ## Project evolution
 
-Scaleify has progressed roughly through the following stages:
+Scaleify has progressed roughly through:
 
 ```text
-handcrafted scale/style profiles
+handcrafted style profiles
         ↓
 onset-aware melody extraction
         ↓
-corpus tuning of existing profiles
+corpus tuning
         ↓
-fully unsupervised style learning
+unsupervised style learning
         ↓
 core + auxiliary pitch vocabulary
         ↓
 traditional and modern corpus comparison
 ```
 
-The current research question is no longer simply:
-
-> Can a melody be converted to a predefined cultural scale?
-
-Instead, it is closer to:
+The current research question is closer to:
 
 > Can recurring melodic characteristics be learned from a corpus and transferred to another melody in a perceptually meaningful way?
 
@@ -203,9 +267,9 @@ Important limitations include:
 * dependence on corpus quality
 * imperfect tonic estimation
 * audio transcription errors
-* heuristic cluster-count selection
-* limited modeling of chromatic and modulating music
-* no formal perceptual validation yet
+* heuristic cluster selection
+* incomplete modeling of chromatic and modulating music
+* perceptual validation still in progress
 
 The system should therefore be treated as an experimental tool for studying melodic representation and transfer, not as an automatic classifier of musical cultures.
 

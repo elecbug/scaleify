@@ -32,6 +32,9 @@ set -euo pipefail
 CURRENT_DIR="$(pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+VENV_DIR="$ROOT_DIR/venv"
+PYTHON="$VENV_DIR/bin/python"
+SETUP_SCRIPT="$SCRIPT_DIR/setup.sh"
 RESULTS_DIR="$ROOT_DIR/results"
 STYLE_DIR="$RESULTS_DIR/styles_tuned"
 GENERATOR_DIR="$SCRIPT_DIR/gen"
@@ -43,6 +46,20 @@ TWINKLE="$RESULTS_DIR/twinkle_twinkle_test.wav"
 
 FORCE_DOWNLOAD=0
 FORCE_TRAINING=0
+
+ensure_venv() {
+    if [[ ! -x "$PYTHON" ]]; then
+        echo "==> Virtual environment not found; running setup"
+
+        [[ -x "$SETUP_SCRIPT" ]] || die "Missing setup script: $SETUP_SCRIPT"
+
+        "$SETUP_SCRIPT"
+    fi
+
+    [[ -x "$PYTHON" ]] || die "Python executable not found after setup: $PYTHON"
+
+    echo "==> Using Python: $PYTHON"
+}
 
 usage() {
     cat <<'EOF'
@@ -125,7 +142,7 @@ run_training() {
 
     if (( FORCE_TRAINING )); then
         echo "==> [${dataset}] Re-running style training (--training)"
-        python3 "$SCRIPT_DIR/train_style.py" \
+        "$PYTHON" "$SCRIPT_DIR/train_style.py" \
             "$dataset_dir/" \
             --output "$STYLE_DIR" \
             "${other_args[@]}"
@@ -145,7 +162,7 @@ run_training() {
         echo "==> [${dataset}] Trained styles exist (${count} clusters); skipping training"
     else
         echo "==> [${dataset}] Trained styles not found; training"
-        python3 "$SCRIPT_DIR/train_style.py" \
+        "$PYTHON" "$SCRIPT_DIR/train_style.py" \
             "$dataset_dir/" \
             --output "$STYLE_DIR" \
             "${other_args[@]}"
@@ -177,7 +194,7 @@ run_listening_tests() {
         style_id="$(basename "$style_file" .json)"
 
         echo "    Erika <- ${style_id}"
-        python3 "$SCRIPT_DIR/scaleify.py" "$ERIKA" \
+        "$PYTHON" "$SCRIPT_DIR/scaleify.py" "$ERIKA" \
             --style "$style_id" \
             --style-dir "$STYLE_DIR/" \
             --root G \
@@ -190,7 +207,7 @@ run_listening_tests() {
         style_id="$(basename "$style_file" .json)"
 
         echo "    Korobeiniki <- ${style_id}"
-        python3 "$SCRIPT_DIR/scaleify.py" "$KOROBEINIKI" \
+        "$PYTHON" "$SCRIPT_DIR/scaleify.py" "$KOROBEINIKI" \
             --style "$style_id" \
             --style-dir "$STYLE_DIR/" \
             --root A \
@@ -203,7 +220,7 @@ run_listening_tests() {
         style_id="$(basename "$style_file" .json)"
 
         echo "    Twinkle <- ${style_id}"
-        python3 "$SCRIPT_DIR/scaleify.py" "$TWINKLE" \
+        "$PYTHON" "$SCRIPT_DIR/scaleify.py" "$TWINKLE" \
             --style "$style_id" \
             --style-dir "$STYLE_DIR/" \
             --root C \
@@ -220,26 +237,26 @@ run_dataset() {
 
     case "$dataset" in
         japan)
-            generator_cmd="python3 $GENERATOR_DIR/dataset/japan_1892_dataset_generator.py"
+            generator_cmd="$PYTHON $GENERATOR_DIR/dataset/japan_1892_dataset_generator.py"
             dataset_dir="$DATASETS_DIR/japan"
             style_prefix="japan"
             other_args=()
             ;;
         korea)
-            generator_cmd="python3 $GENERATOR_DIR/dataset/korea_traditional_dataset_generator.py"
+            generator_cmd="$PYTHON $GENERATOR_DIR/dataset/korea_traditional_dataset_generator.py"
             dataset_dir="$DATASETS_DIR/korea"
             style_prefix="korea"
             other_args=()
             ;;
         china)
-            generator_cmd="python3 $GENERATOR_DIR/dataset/china_traditional_dataset_generator.py"
+            generator_cmd="$PYTHON $GENERATOR_DIR/dataset/china_traditional_dataset_generator.py"
             dataset_dir="$DATASETS_DIR/china"
             style_prefix="china"
             other_args=()
             ;;
         jsmel|japan-jsmel|japan_jsmel)
             dataset="jsmel"
-            generator_cmd="python3 $GENERATOR_DIR/dataset/jsmel_pd_dataset_generator.py"
+            generator_cmd="$PYTHON $GENERATOR_DIR/dataset/jsmel_pd_dataset_generator.py"
             dataset_dir="$DATASETS_DIR/japan_jsmel"
             style_prefix="japan_jsmel"
             other_args=()
@@ -247,7 +264,7 @@ run_dataset() {
         vocaloid)
             # Keep sources separate from generated training WAVs.
             # The generator writes output to dataset/vocaloid by default.
-            generator_cmd="python3 $GENERATOR_DIR/dataset/vocaloid_dataset_generator.py $DATASETS_DIR/vocaloid/sources --preset official --accept-source-terms --output $DATASETS_DIR/vocaloid"
+            generator_cmd="$PYTHON $GENERATOR_DIR/dataset/vocaloid_dataset_generator.py $DATASETS_DIR/vocaloid/sources --preset official --accept-source-terms --output $DATASETS_DIR/vocaloid"
             dataset_dir="$DATASETS_DIR/vocaloid"
             style_prefix="vocaloid"
             other_args=("--scale-max-notes" "12")
@@ -278,6 +295,8 @@ run_dataset() {
 }
 
 cd "$SCRIPT_DIR/.." || die "Failed to cd to repository root: $SCRIPT_DIR/.."
+
+ensure_venv
 
 TARGET="$1"
 shift

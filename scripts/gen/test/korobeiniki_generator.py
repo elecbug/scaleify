@@ -15,7 +15,7 @@ SR = 44100
 BPM = 152
 BEAT = 60.0 / BPM
 
-OUTPUT = Path("test/korobeiniki_test.wav")
+OUTPUT = Path("results/korobeiniki_test.wav")
 
 # For pure scale-conversion testing:
 ADD_BASS = False
