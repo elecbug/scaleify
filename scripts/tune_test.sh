@@ -334,7 +334,7 @@ done
 
 case "$TARGET" in
     all)
-        for dataset in japan korea china jsmel vocaloid; do
+        for dataset in japan korea china jsmel vocaloid arabic; do
             run_dataset "$dataset"
         done
         ;;
