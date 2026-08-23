@@ -32,6 +32,7 @@ set -euo pipefail
 STYLE_DIR="data/styles_tuned"
 ERIKA="test/erika_test.wav"
 KOROBEINIKI="test/korobeiniki_test.wav"
+TWINKLE="test/twinkle_twinkle_test.wav"
 
 FORCE_DOWNLOAD=0
 FORCE_TRAINING=0
@@ -150,6 +151,7 @@ run_listening_tests() {
 
     [[ -f "$ERIKA" ]] || die "Missing test file: $ERIKA"
     [[ -f "$KOROBEINIKI" ]] || die "Missing test file: $KOROBEINIKI"
+    [[ -f "$TWINKLE" ]] || die "Missing test file: $TWINKLE"
 
     shopt -s nullglob
     local style_files=( "${STYLE_DIR}/${style_prefix}_cluster_"*.json )
@@ -184,6 +186,19 @@ run_listening_tests() {
             --style "$style_id" \
             --style-dir "$STYLE_DIR/" \
             --root A \
+            --style-amount 0.9 \
+            --rhythm-amount 0.55 \
+            --timbre reed
+    done
+
+    for style_file in "${style_files[@]}"; do
+        style_id="$(basename "$style_file" .json)"
+
+        echo "    Twinkle <- ${style_id}"
+        python3 scaleify.py "$TWINKLE" \
+            --style "$style_id" \
+            --style-dir "$STYLE_DIR/" \
+            --root C \
             --style-amount 0.9 \
             --rhythm-amount 0.55 \
             --timbre reed
