@@ -39,6 +39,7 @@ RESULTS_DIR="$ROOT_DIR/results"
 STYLE_DIR="$RESULTS_DIR/styles_tuned"
 GENERATOR_DIR="$SCRIPT_DIR/gen"
 DATASETS_DIR="$ROOT_DIR/datasets"
+REPORTS_DIR="$RESULTS_DIR/reports"
 
 ERIKA="$RESULTS_DIR/erika_test.wav"
 KOROBEINIKI="$RESULTS_DIR/korobeiniki_test.wav"
@@ -104,9 +105,9 @@ has_styles() {
 }
 
 cleanup_training_outputs() {
-    mkdir -p "$STYLE_DIR"
-    rm -f "${STYLE_DIR}"/*.csv
-    rm -f "${STYLE_DIR}"/*_report.json
+    mkdir -p "$REPORTS_DIR"
+    mv "${STYLE_DIR}"/*.csv "$REPORTS_DIR/"
+    mv "${STYLE_DIR}"/*_report.json "$REPORTS_DIR/"
 }
 
 run_generator() {
@@ -269,6 +270,12 @@ run_dataset() {
             style_prefix="vocaloid"
             other_args=("--scale-max-notes" "12")
             ;;
+        arabic)
+            generator_cmd="$PYTHON $GENERATOR_DIR/dataset/arabic_taqasim_dataset_generator.py"
+            dataset_dir="$DATASETS_DIR/arabic"
+            style_prefix="arabic"
+            other_args=("--scale-max-notes" "12")
+            ;;
         *)
             die "Unknown dataset: $dataset"
             ;;
@@ -326,7 +333,7 @@ case "$TARGET" in
             run_dataset "$dataset"
         done
         ;;
-    japan|korea|china|jsmel|japan-jsmel|japan_jsmel|vocaloid)
+    japan|korea|china|jsmel|japan-jsmel|japan_jsmel|vocaloid|arabic)
         run_dataset "$TARGET"
         ;;
     -h|--help)
