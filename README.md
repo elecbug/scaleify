@@ -32,7 +32,7 @@ datasets/
 
 results/
     generated test audio
-    styles_tuned/
+    styles/
         learned style profiles
 
 scripts/
@@ -56,7 +56,7 @@ python -m pip install -r requirements.txt
 ```bash
 python3 scripts/scaleify.py results/twinkle_twinkle_test.wav \
     --style japan_cluster_1 \
-    --style-dir results/styles_tuned \
+    --style-dir results/styles \
     --root C \
     --style-amount 0.9 \
     --rhythm-amount 0.55 \
@@ -68,7 +68,7 @@ Automatic root estimation:
 ```bash
 python3 scripts/scaleify.py melody.wav \
     --style japan_cluster_1 \
-    --style-dir results/styles_tuned \
+    --style-dir results/styles \
     --root auto
 ```
 
@@ -76,14 +76,14 @@ python3 scripts/scaleify.py melody.wav \
 
 ```bash
 python3 scripts/train_style.py datasets/japan \
-    --output results/styles_tuned
+    --output results/styles
 ```
 
 Automatic clustering:
 
 ```bash
 python3 scripts/train_style.py datasets/japan \
-    --output results/styles_tuned \
+    --output results/styles \
     --clusters auto
 ```
 
@@ -91,7 +91,7 @@ Fixed cluster count:
 
 ```bash
 python3 scripts/train_style.py datasets/japan \
-    --output results/styles_tuned \
+    --output results/styles \
     --clusters 3
 ```
 
@@ -99,7 +99,7 @@ For the Vocaloid corpus:
 
 ```bash
 python3 scripts/train_style.py datasets/vocaloid \
-    --output results/styles_tuned \
+    --output results/styles \
     --scale-max-notes 12
 ```
 
@@ -147,7 +147,7 @@ For Vocaloid experiments, a broader pitch vocabulary can be allowed during train
 
 ```bash
 python3 train_style.py ../datasets/vocaloid \
-    --output ../results/styles_tuned \
+    --output ../results/styles \
     --scale-max-notes 12
 ```
 
@@ -160,7 +160,7 @@ results/
 ├── erika_test.wav
 ├── korobeiniki_test.wav
 ├── twinkle_twinkle_test.wav
-└── styles_tuned/
+└── styles/
 ```
 
 Transformed files are also written alongside the corresponding test material.
@@ -217,7 +217,7 @@ The helper uses:
 ```text
 datasets/               corpus data
 results/                listening-test audio
-results/styles_tuned/   trained style profiles
+results/styles/         trained style profiles
 scripts/gen/            dataset generators
 ```
 

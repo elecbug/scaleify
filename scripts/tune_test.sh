@@ -36,14 +36,16 @@ VENV_DIR="$ROOT_DIR/.venv"
 PYTHON="$VENV_DIR/bin/python"
 SETUP_SCRIPT="$SCRIPT_DIR/setup.sh"
 RESULTS_DIR="$ROOT_DIR/results"
-STYLE_DIR="$RESULTS_DIR/styles_tuned"
+TUNED_RESULTS_DIR="$RESULTS_DIR/tuned"
+STYLE_DIR="$RESULTS_DIR/styles"
 GENERATOR_DIR="$SCRIPT_DIR/gen"
 DATASETS_DIR="$ROOT_DIR/datasets"
 REPORTS_DIR="$RESULTS_DIR/reports"
+RAW_RESULTS_DIR="$RESULTS_DIR/raw"
 
-ERIKA="$RESULTS_DIR/erika_test.wav"
-KOROBEINIKI="$RESULTS_DIR/korobeiniki_test.wav"
-TWINKLE="$RESULTS_DIR/twinkle_twinkle_test.wav"
+ERIKA="$RAW_RESULTS_DIR/erika_test.wav"
+KOROBEINIKI="$RAW_RESULTS_DIR/korobeiniki_test.wav"
+TWINKLE="$RAW_RESULTS_DIR/twinkle_twinkle_test.wav"
 
 FORCE_DOWNLOAD=0
 FORCE_TRAINING=0
@@ -201,6 +203,7 @@ run_listening_tests() {
             --root G \
             --style-amount 0.9 \
             --rhythm-amount 0.55 \
+            --output "$TUNED_RESULTS_DIR/erika_${style_id}.wav" \
             --timbre reed
     done
 
@@ -214,6 +217,7 @@ run_listening_tests() {
             --root A \
             --style-amount 0.9 \
             --rhythm-amount 0.55 \
+            --output "$TUNED_RESULTS_DIR/korobeiniki_${style_id}.wav" \
             --timbre reed
     done
 
@@ -227,6 +231,7 @@ run_listening_tests() {
             --root C \
             --style-amount 0.9 \
             --rhythm-amount 0.55 \
+            --output "$TUNED_RESULTS_DIR/twinkle_${style_id}.wav" \
             --timbre reed
     done
 }

@@ -101,7 +101,7 @@ audio /= max(
 
 audio *= 0.82
 
-out = Path("results/twinkle_twinkle_test.wav")
+out = Path("results/raw/twinkle_twinkle_test.wav")
 out.parent.mkdir(parents=True, exist_ok=True)
 
 sf.write(
