@@ -140,11 +140,11 @@ MAQAM_DISPLAY = {
 # Archive naming is not treated as a formal API. Accept common spellings so the
 # generator remains robust to folder/file naming differences.
 MAQAM_ALIASES: dict[str, tuple[str, ...]] = {
-    "ajam": ("ajam", "agam"),
-    "hijaz": ("hijaz", "hejazi", "hejazz"),
+    "ajam": ("ajam", "ajjam", "agam"),
+    "hijaz": ("hijaz", "hijaaz", "hejazi", "hejazz"),
+    "kurd": ("kurd", "kord", "kurdi"),
+    "rast": ("rast", "raaast", "raast"),
     "bayati": ("bayati", "bayaty", "bayat"),
-    "kurd": ("kurd", "kurdi"),
-    "rast": ("rast", "raast"),
     "nahawand": ("nahawand", "nahwand", "nihawand", "nehawand"),
     "huzam": ("huzam", "huzzam", "hizam"),
     "saba": ("saba", "sabaa"),
