@@ -1,0 +1,856 @@
+{
+  "id": "japan_jsmel_cluster_1",
+  "label": "Japan Jsmel Cluster 1",
+  "region": "Japan Jsmel",
+  "description": "Unsupervised style cluster 1/2 inferred from 288 monophonic corpus files. Scale and melodic grammar were learned from the cluster rather than supplied by a template.",
+  "scale": [
+    0,
+    2,
+    3,
+    4,
+    5,
+    7,
+    10
+  ],
+  "auxiliary_degrees": {
+    "1": 0.024696,
+    "9": 0.029232
+  },
+  "grammar": {
+    "pitch_deviation_weight": 0.9,
+    "motion_preservation_weight": 0.25,
+    "contour_penalty": 0.8,
+    "leap_penalty": 0.08,
+    "max_preferred_leap": 7.0,
+    "candidate_shift_semitones": 4.5,
+    "candidate_count": 9,
+    "event_pitch_change": 0.8,
+    "min_event_frames": 4,
+    "phrase_gap_ms": 150.0,
+    "phrase_long_note_factor": 1.65,
+    "phrase_leap_semitones": 7.0,
+    "min_phrase_events": 3,
+    "degree_weights": {
+      "0": 1.3981
+    },
+    "interval_weights": {
+      "2": 2.5296,
+      "3": 0.9637,
+      "5": 0.0852
+    },
+    "transition_weights": {
+      "5>3": 1.6079,
+      "3>5": 1.346,
+      "4>2": 1.1142,
+      "7>5": 1.1127,
+      "0>10": 1.08,
+      "5>7": 1.022,
+      "10>0": 0.923,
+      "2>4": 0.8952,
+      "0>2": 0.8544,
+      "7>4": 0.8293,
+      "2>0": 0.8061,
+      "4>7": 0.5419,
+      "10>7": 0.5062,
+      "7>10": 0.4802,
+      "5>4": 0.4127,
+      "4>5": 0.2978,
+      "3>0": 0.1586,
+      "5>2": 0.0543
+    },
+    "ascending_transition_weights": {
+      "2>4": 2.256,
+      "5>7": 2.1151,
+      "7>10": 2.0941,
+      "3>5": 1.9838,
+      "0>2": 1.482,
+      "4>7": 1.4807,
+      "0>3": 1.2654,
+      "4>5": 1.1991,
+      "10>0": 1.1434,
+      "2>3": 1.0992,
+      "2>5": 0.9654,
+      "5>10": 0.441,
+      "0>4": 0.2543,
+      "7>0": 0.131
+    },
+    "descending_transition_weights": {
+      "10>7": 2.3257,
+      "4>2": 2.1069,
+      "7>5": 2.072,
+      "5>3": 1.8947,
+      "7>4": 1.5506,
+      "0>10": 1.4119,
+      "2>0": 1.3564,
+      "3>0": 1.127,
+      "5>4": 1.0427,
+      "5>2": 0.9682,
+      "3>2": 0.8118,
+      "4>0": 0.2963,
+      "0>7": 0.1209
+    },
+    "trigram_weights": {
+      "3>5>3": 2.5864,
+      "5>3>5": 2.1531,
+      "4>7>4": 1.998,
+      "7>5>3": 1.7845,
+      "4>5>4": 1.6611,
+      "4>2>4": 1.6546,
+      "3>5>7": 1.6045,
+      "5>7>5": 1.6042,
+      "4>2>0": 1.5922,
+      "5>3>0": 1.5509,
+      "5>4>2": 1.5171,
+      "7>5>4": 1.5098,
+      "2>4>2": 1.4984,
+      "4>5>7": 1.3667,
+      "3>0>3": 1.3623,
+      "0>2>4": 1.3601,
+      "10>0>10": 1.314,
+      "7>5>7": 1.2933,
+      "10>7>10": 1.2869,
+      "0>10>0": 1.2574,
+      "7>4>2": 1.2504,
+      "4>3>4": 1.2486,
+      "2>4>5": 1.2012,
+      "2>0>10": 1.1868
+    },
+    "preferred_phrases": [
+      {
+        "degrees": [
+          5,
+          3,
+          5,
+          3
+        ],
+        "weight": 3.2284,
+        "support_count": 76,
+        "support_files": 28
+      },
+      {
+        "degrees": [
+          5,
+          3,
+          5,
+          3,
+          0
+        ],
+        "weight": 3.1361,
+        "support_count": 45,
+        "support_files": 19
+      },
+      {
+        "degrees": [
+          3,
+          5,
+          3,
+          5
+        ],
+        "weight": 2.933,
+        "support_count": 47,
+        "support_files": 25
+      },
+      {
+        "degrees": [
+          3,
+          5,
+          3,
+          0
+        ],
+        "weight": 2.9325,
+        "support_count": 77,
+        "support_files": 31
+      },
+      {
+        "degrees": [
+          3,
+          5,
+          7,
+          5,
+          3
+        ],
+        "weight": 2.8871,
+        "support_count": 27,
+        "support_files": 19
+      },
+      {
+        "degrees": [
+          4,
+          2,
+          0,
+          2,
+          4
+        ],
+        "weight": 2.8652,
+        "support_count": 27,
+        "support_files": 14
+      },
+      {
+        "degrees": [
+          5,
+          7,
+          5,
+          3,
+          0
+        ],
+        "weight": 2.8291,
+        "support_count": 33,
+        "support_files": 20
+      },
+      {
+        "degrees": [
+          10,
+          0,
+          2,
+          0,
+          10
+        ],
+        "weight": 2.8058,
+        "support_count": 96,
+        "support_files": 25
+      },
+      {
+        "degrees": [
+          2,
+          0,
+          10,
+          0,
+          2
+        ],
+        "weight": 2.804,
+        "support_count": 82,
+        "support_files": 18
+      },
+      {
+        "degrees": [
+          3,
+          5,
+          3,
+          5,
+          3
+        ],
+        "weight": 2.7606,
+        "support_count": 21,
+        "support_files": 11
+      },
+      {
+        "degrees": [
+          5,
+          3,
+          5,
+          3,
+          5
+        ],
+        "weight": 2.7353,
+        "support_count": 21,
+        "support_files": 13
+      },
+      {
+        "degrees": [
+          5,
+          7,
+          5,
+          3
+        ],
+        "weight": 2.7162,
+        "support_count": 51,
+        "support_files": 29
+      },
+      {
+        "degrees": [
+          10,
+          0,
+          10,
+          0,
+          10
+        ],
+        "weight": 2.6234,
+        "support_count": 84,
+        "support_files": 25
+      },
+      {
+        "degrees": [
+          0,
+          10,
+          7,
+          10,
+          0
+        ],
+        "weight": 2.6127,
+        "support_count": 73,
+        "support_files": 28
+      },
+      {
+        "degrees": [
+          3,
+          5,
+          3,
+          0,
+          3
+        ],
+        "weight": 2.6024,
+        "support_count": 17,
+        "support_files": 10
+      },
+      {
+        "degrees": [
+          5,
+          3,
+          0,
+          3,
+          5
+        ],
+        "weight": 2.5781,
+        "support_count": 18,
+        "support_files": 17
+      }
+    ],
+    "cadence_degrees": {
+      "0": 0.9145
+    },
+    "cadence_patterns": [
+      {
+        "degrees": [
+          3,
+          5,
+          0
+        ],
+        "weight": 1.2809,
+        "support_count": 21,
+        "support_files": 10
+      },
+      {
+        "degrees": [
+          0,
+          2,
+          7,
+          5
+        ],
+        "weight": 1.1926,
+        "support_count": 5,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          5,
+          3,
+          5,
+          0
+        ],
+        "weight": 1.1848,
+        "support_count": 19,
+        "support_files": 10
+      },
+      {
+        "degrees": [
+          0,
+          2,
+          10,
+          0
+        ],
+        "weight": 1.1635,
+        "support_count": 21,
+        "support_files": 10
+      },
+      {
+        "degrees": [
+          2,
+          10,
+          0
+        ],
+        "weight": 1.1236,
+        "support_count": 27,
+        "support_files": 13
+      },
+      {
+        "degrees": [
+          5,
+          0
+        ],
+        "weight": 1.0587,
+        "support_count": 46,
+        "support_files": 24
+      },
+      {
+        "degrees": [
+          2,
+          0,
+          2,
+          0
+        ],
+        "weight": 0.9119,
+        "support_count": 44,
+        "support_files": 12
+      },
+      {
+        "degrees": [
+          10,
+          0,
+          7
+        ],
+        "weight": 0.9117,
+        "support_count": 27,
+        "support_files": 15
+      },
+      {
+        "degrees": [
+          5,
+          3,
+          0
+        ],
+        "weight": 0.895,
+        "support_count": 82,
+        "support_files": 36
+      },
+      {
+        "degrees": [
+          0,
+          10,
+          0,
+          7
+        ],
+        "weight": 0.8885,
+        "support_count": 26,
+        "support_files": 15
+      },
+      {
+        "degrees": [
+          5,
+          0,
+          5,
+          0
+        ],
+        "weight": 0.8809,
+        "support_count": 6,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          3,
+          0
+        ],
+        "weight": 0.8772,
+        "support_count": 95,
+        "support_files": 44
+      }
+    ]
+  },
+  "rhythm": {
+    "enabled": true,
+    "preserve_phrase_duration": true,
+    "quantize_strength": 0.2,
+    "preferred_duration_ratios": [
+      0.25,
+      0.5,
+      0.75,
+      1.0,
+      1.5,
+      2.0
+    ],
+    "degree_duration_multipliers": {},
+    "phrase_end_multiplier": 1.375,
+    "gap_multiplier": 1.0,
+    "max_duration_change": 0.3
+  },
+  "tuning": {
+    "degree_cents": {}
+  },
+  "ornaments": [],
+  "modulation": {
+    "enabled": false,
+    "options": []
+  },
+  "notes": "Unsupervised corpus-derived v10.1 profile. Ornament/modulation rules were intentionally left empty because they were not estimated robustly.",
+  "training": {
+    "generated_utc": "2026-08-23T01:18:40.951518+00:00",
+    "method": "scaleify_unsupervised_cluster_v3",
+    "cluster_index": 1,
+    "cluster_count": 2,
+    "files_analyzed": 288,
+    "events": 18951,
+    "phrases": 1388,
+    "inferred_scale": [
+      0,
+      2,
+      3,
+      4,
+      5,
+      7,
+      10
+    ],
+    "inferred_scale_coverage": 0.9169,
+    "auxiliary_degrees": {
+      "1": 0.024696,
+      "9": 0.029232
+    },
+    "scale_selection": {
+      "selection_reason": "coverage_elbow",
+      "core_min_coverage": 0.9,
+      "complexity_penalty": 0.02,
+      "auxiliary_min_share": 0.015,
+      "candidates": [
+        {
+          "notes": 5,
+          "scale": [
+            0,
+            2,
+            5,
+            7,
+            10
+          ],
+          "coverage": 0.829893,
+          "cutoff_share": 0.111265,
+          "next_share": 0.045376,
+          "gap": 0.065888,
+          "score": 0.065888,
+          "eligible": false
+        },
+        {
+          "notes": 6,
+          "scale": [
+            0,
+            2,
+            3,
+            5,
+            7,
+            10
+          ],
+          "coverage": 0.875269,
+          "cutoff_share": 0.045376,
+          "next_share": 0.04166,
+          "gap": 0.003717,
+          "score": -0.016283,
+          "eligible": false
+        },
+        {
+          "notes": 7,
+          "scale": [
+            0,
+            2,
+            3,
+            4,
+            5,
+            7,
+            10
+          ],
+          "coverage": 0.916929,
+          "cutoff_share": 0.04166,
+          "next_share": 0.029232,
+          "gap": 0.012427,
+          "score": -0.027573,
+          "eligible": true
+        }
+      ]
+    },
+    "root_distribution": {
+      "A": 75,
+      "A#": 5,
+      "B": 13,
+      "C": 28,
+      "C#": 1,
+      "D": 33,
+      "E": 47,
+      "F": 31,
+      "F#": 9,
+      "G": 46
+    },
+    "source_files": [
+      "A020.wav",
+      "B004.wav",
+      "B005.wav",
+      "B008.wav",
+      "B011.wav",
+      "C007.wav",
+      "C017.wav",
+      "C019.wav",
+      "D005.wav",
+      "D006.wav",
+      "D010.wav",
+      "D012.wav",
+      "D022.wav",
+      "E010.wav",
+      "E017.wav",
+      "E022.wav",
+      "E023.wav",
+      "F002.wav",
+      "F004.wav",
+      "F008.wav",
+      "F009.wav",
+      "F018.wav",
+      "G005.wav",
+      "G009.wav",
+      "H006.wav",
+      "H007.wav",
+      "H008.wav",
+      "K002.wav",
+      "K007.wav",
+      "K024.wav",
+      "K029.wav",
+      "K033.wav",
+      "K041.wav",
+      "K043.wav",
+      "K044.wav",
+      "K045.wav",
+      "K067.wav",
+      "K073.wav",
+      "K077.wav",
+      "K079.wav",
+      "K091.wav",
+      "K093.wav",
+      "K114.wav",
+      "L001.wav",
+      "L002.wav",
+      "L004.wav",
+      "L005.wav",
+      "L006.wav",
+      "L007.wav",
+      "L009.wav",
+      "L010.wav",
+      "L011.wav",
+      "L012.wav",
+      "L013.wav",
+      "L015.wav",
+      "L016.wav",
+      "L017.wav",
+      "L018.wav",
+      "L019.wav",
+      "L020.wav",
+      "L022.wav",
+      "L023.wav",
+      "L024.wav",
+      "L025.wav",
+      "L026.wav",
+      "L027.wav",
+      "L028.wav",
+      "L029.wav",
+      "L030.wav",
+      "L032.wav",
+      "L033.wav",
+      "L034.wav",
+      "L035.wav",
+      "L036.wav",
+      "L037.wav",
+      "L038.wav",
+      "L039.wav",
+      "L040.wav",
+      "L041.wav",
+      "L042.wav",
+      "L044.wav",
+      "L045.wav",
+      "L046.wav",
+      "L047.wav",
+      "L048.wav",
+      "L049.wav",
+      "L050.wav",
+      "L051.wav",
+      "L052.wav",
+      "L053.wav",
+      "L054.wav",
+      "L055.wav",
+      "L056.wav",
+      "L057.wav",
+      "L059.wav",
+      "L061.wav",
+      "L062.wav",
+      "L063.wav",
+      "L064.wav",
+      "L065.wav",
+      "L066.wav",
+      "L067.wav",
+      "L068.wav",
+      "L069.wav",
+      "L070.wav",
+      "L071.wav",
+      "L072.wav",
+      "L074.wav",
+      "L075.wav",
+      "L077.wav",
+      "L079.wav",
+      "L080.wav",
+      "L081.wav",
+      "L082.wav",
+      "L083.wav",
+      "L085.wav",
+      "L086.wav",
+      "L087.wav",
+      "L088.wav",
+      "L089.wav",
+      "L090.wav",
+      "L091.wav",
+      "L093.wav",
+      "L094.wav",
+      "L096.wav",
+      "L097.wav",
+      "L098.wav",
+      "L099.wav",
+      "L100.wav",
+      "L101.wav",
+      "L102.wav",
+      "L103.wav",
+      "L104.wav",
+      "L105.wav",
+      "L106.wav",
+      "L108.wav",
+      "L109.wav",
+      "L111.wav",
+      "L112.wav",
+      "L113.wav",
+      "L114.wav",
+      "L115.wav",
+      "L116.wav",
+      "L117.wav",
+      "L118.wav",
+      "L119.wav",
+      "L120.wav",
+      "L121.wav",
+      "L122.wav",
+      "L123.wav",
+      "L126.wav",
+      "L129.wav",
+      "L130.wav",
+      "L131.wav",
+      "L132.wav",
+      "L133.wav",
+      "L134.wav",
+      "L135.wav",
+      "L136.wav",
+      "L137.wav",
+      "L138.wav",
+      "L139.wav",
+      "L140.wav",
+      "L141.wav",
+      "L142.wav",
+      "L144.wav",
+      "L145.wav",
+      "L146.wav",
+      "L147.wav",
+      "L148.wav",
+      "L149.wav",
+      "L150.wav",
+      "L151.wav",
+      "L152.wav",
+      "L153.wav",
+      "L154.wav",
+      "L155.wav",
+      "M001.wav",
+      "N001.wav",
+      "N005.wav",
+      "N009.wav",
+      "N010.wav",
+      "N011.wav",
+      "N013.wav",
+      "N015.wav",
+      "N016.wav",
+      "N017.wav",
+      "N018.wav",
+      "N021.wav",
+      "N024.wav",
+      "N028.wav",
+      "N031.wav",
+      "N032.wav",
+      "N033.wav",
+      "N035.wav",
+      "N036.wav",
+      "N038.wav",
+      "N039.wav",
+      "O002.wav",
+      "O046.wav",
+      "P006.wav",
+      "P014.wav",
+      "P019.wav",
+      "P024.wav",
+      "P033.wav",
+      "P034.wav",
+      "P036.wav",
+      "P043.wav",
+      "P050.wav",
+      "P054.wav",
+      "P055.wav",
+      "P056.wav",
+      "P058.wav",
+      "P062.wav",
+      "P067.wav",
+      "P074.wav",
+      "Q001.wav",
+      "Q002.wav",
+      "Q012.wav",
+      "Q015.wav",
+      "Q020.wav",
+      "Q036.wav",
+      "Q038.wav",
+      "Q041.wav",
+      "Q047.wav",
+      "Q053.wav",
+      "Q055.wav",
+      "Q056.wav",
+      "Q060.wav",
+      "Q069.wav",
+      "Q070.wav",
+      "Q072.wav",
+      "Q073.wav",
+      "Q076.wav",
+      "Q083.wav",
+      "Q100.wav",
+      "Q101.wav",
+      "Q104.wav",
+      "Q105.wav",
+      "Q124.wav",
+      "Q129.wav",
+      "Q132.wav",
+      "Q134.wav",
+      "Q135.wav",
+      "Q146.wav",
+      "Q151.wav",
+      "Q152.wav",
+      "Q153.wav",
+      "Q154.wav",
+      "Q155.wav",
+      "Q158.wav",
+      "Q159.wav",
+      "Q166.wav",
+      "Q173.wav",
+      "Q186.wav",
+      "Q197.wav",
+      "Q210.wav",
+      "Q212.wav",
+      "Q222.wav",
+      "Q225.wav",
+      "Q226.wav",
+      "Q228.wav",
+      "Q229.wav",
+      "Q232.wav",
+      "Q238.wav",
+      "Q239.wav",
+      "Q249.wav",
+      "R001.wav",
+      "R002.wav",
+      "R003.wav",
+      "R004.wav",
+      "R005.wav",
+      "R006.wav",
+      "R007.wav",
+      "R008.wav",
+      "R009.wav",
+      "R011.wav",
+      "R012.wav",
+      "R013.wav",
+      "R014.wav",
+      "R015.wav",
+      "R016.wav",
+      "R017.wav",
+      "R018.wav",
+      "R019.wav",
+      "R020.wav",
+      "R021.wav",
+      "R022.wav"
+    ],
+    "fixes": [
+      "out-of-scale degrees excluded from melodic grammar",
+      "out-of-scale notes break melodic runs",
+      "same-degree repetitions excluded from melodic transitions",
+      "cadence requires count and cross-file support",
+      "core scale separated from auxiliary degrees using occupancy elbow",
+      "roots iteratively refined against cluster core scale"
+    ]
+  }
+}

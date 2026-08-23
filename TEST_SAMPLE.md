@@ -93,3 +93,18 @@ python3 scaleify.py test/erika_test.wav --style china_cluster_2 --style-dir data
 python3 scaleify.py test/korobeiniki_test.wav --style china_cluster_1 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
 python3 scaleify.py test/korobeiniki_test.wav --style china_cluster_2 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
 ```
+
+```sh
+# Japan JSMel dataset generation and style training
+python3 generator/dataset/jsmel_pd_dataset_generator.py
+python3 train_style.py dataset/japan_jsmel/ --output data/styles_tuned
+
+rm -rf data/styles_tuned/*.csv
+rm -rf data/styles_tuned/*_report.json
+
+python3 scaleify.py test/erika_test.wav --style japan_jsmel_cluster_1 --style-dir data/styles_tuned/ --root G --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
+python3 scaleify.py test/erika_test.wav --style japan_jsmel_cluster_2 --style-dir data/styles_tuned/ --root G --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
+
+python3 scaleify.py test/korobeiniki_test.wav --style japan_jsmel_cluster_1 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
+python3 scaleify.py test/korobeiniki_test.wav --style japan_jsmel_cluster_2 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
+``` 
