@@ -40,6 +40,8 @@ for generator in "${GENERATORS[@]}"; do
     "$PYTHON" "$generator"
 done
 
+cp "$ROOT_DIR/results/raw/"* "$ROOT_DIR/results/tuned/"
+
 echo
 echo "==> All test-song generators completed."
 echo "    Results directory: $ROOT_DIR/results"
