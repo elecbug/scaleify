@@ -108,3 +108,12 @@ python3 scaleify.py test/erika_test.wav --style japan_jsmel_cluster_2 --style-di
 python3 scaleify.py test/korobeiniki_test.wav --style japan_jsmel_cluster_1 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
 python3 scaleify.py test/korobeiniki_test.wav --style japan_jsmel_cluster_2 --style-dir data/styles_tuned/ --root A --style-amount 0.9 --rhythm-amount 0.55 --timbre reed
 ``` 
+
+```sh
+# Vocaloid dataset generation and style training
+python3 generator/dataset/vocaloid_dataset_generator.py dataset/vocaloid/ --preset official --accept-source-terms 
+python3 train_style.py dataset/vocaloid/ --output data/styles_tuned
+
+rm -rf data/styles_tuned/*.csv
+rm -rf data/styles_tuned/*_report.json
+```
