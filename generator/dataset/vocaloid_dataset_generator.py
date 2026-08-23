@@ -8,29 +8,13 @@ Supported source formats
 ------------------------
 Native:
   - .vsqx  VOCALOID3 / VOCALOID4
-  - .vsq   VOCALOID2 (SMF-based VSQ; parsed as MIDI notes)
+  - .vsq   VOCALOID2
   - .ustx  OpenUtau
   - .ust   UTAU
   - .mid / .midi  standard or VOCALOID-exported MIDI
 
 For .vpr (VOCALOID5), .ppsf, .svp, etc., convert to .vsqx or .ustx first with
 UtaFormatix, then feed the converted files to this tool.
-
-Official-source presets
------------------------
-The generator can also discover creator-distributed symbolic assets:
-
-  --preset otoiro-deco27
-      DECO*27 official MIDI assets from OTOIRO SPECIAL.
-
-  --preset crusher
-      Original Crusher songs with creator-distributed VSQ/VSQX/MIDI/UST assets.
-
-  --preset official
-      Both of the above.
-
-Preset downloads require --accept-source-terms. Use --discover-only to inspect
-what would be downloaded without fetching the project files.
 
 Output
 ------
@@ -71,14 +55,6 @@ Examples
 Local projects:
   python vocaloid_dataset_generator.py ./vocaloid_sources
 
-Official creator-distributed corpus:
-  python vocaloid_dataset_generator.py ./vocaloid_sources \
-      --preset official --accept-source-terms
-
-Inspect official preset discoveries without downloading:
-  python vocaloid_dataset_generator.py ./vocaloid_sources \
-      --preset official --discover-only
-
 Manifest + local projects:
   python vocaloid_dataset_generator.py ./vocaloid_sources \
       --sources-csv sources.csv
@@ -96,6 +72,7 @@ Then train with the existing trainer:
 from __future__ import annotations
 
 import argparse
+import base64
 import configparser
 import csv
 import hashlib
@@ -109,6 +86,7 @@ import time
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
+from collections import Counter
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlparse, urljoin, parse_qs, urlencode, urlunparse
@@ -127,20 +105,27 @@ CONVERT_WITH_UTAFORMATIX = {
     ".vpr", ".svp", ".s5p", ".ccs", ".dv", ".ppsf", ".tssln", ".ufdata"
 }
 
+FORMAT_PRIORITY = {
+    ".vsqx": 60,
+    ".vsq": 50,
+    ".mid": 40,
+    ".midi": 40,
+    ".ustx": 30,
+    ".ust": 20,
+}
+
+INTERNAL_SOURCE_DIRS = {"_downloads", "_source"}
+
 OTOIRO_SPECIAL_URL = "https://otoiro.co.jp/special/"
 OTOIRO_TERMS_URL = "https://otoiro.co.jp/s_terms/"
 CRUSHER_RESOURCES_URL = "https://ccrusherr.com/resources"
 CRUSHER_USAGE_URL = "https://ccrusherr.com/usage"
 
-# Current non-DECO*27 titles sharing OTOIRO's SPECIAL page. Keeping this as a
-# deny-list is safer than silently mixing a second producer into a DECO*27 corpus.
 OTOIRO_OTHER_CREATOR_TITLES = {
     "おなかすいた", "キュンする。", "釈迦ラカ", "アンハッピージャム",
     "恋愛工場", "ドラキュラブ", "GABI", "吐いちゃうぞ",
 }
 
-# Only original Crusher works. Covers/remixes such as BIG BROTHER, LOVE IS WAR,
-# ALIEN ALIEN, etc. are deliberately excluded from the built-in preset.
 CRUSHER_ORIGINAL_TITLES = {
     "ECHO", "WICKED", "AGAIN", "PROPAGANDA!", "SLEEPLESS NIGHTS",
     "いつまでも (ITSUMADEMO)",
@@ -479,8 +464,6 @@ def score_track(track: Track) -> TrackScore | None:
     )):
         name_bonus -= 35.0
 
-    # Main singing lines should be close to monophonic. Increase this term for
-    # full-arrangement official MIDIs where accompaniment tracks can be denser.
     early_bonus = 20.0 / (1.0 + max(0, track.index))
     register_bonus = max(0.0, min(12.0, (mean_pitch - 48.0) * 0.35))
     score = (
@@ -637,6 +620,10 @@ def write_symbolic_csv(path: Path, notes: list[Note], resolution: int, bpm: floa
             ])
 
 
+def _is_macos_metadata_path(path: Path) -> bool:
+    return "__MACOSX" in path.parts or path.name.startswith("._") or path.name == ".DS_Store"
+
+
 def safe_extract_zip(archive: Path, target: Path) -> None:
     with zipfile.ZipFile(archive, "r") as zf:
         for info in zf.infolist():
@@ -645,269 +632,31 @@ def safe_extract_zip(archive: Path, target: Path) -> None:
             member = Path(info.filename)
             if member.is_absolute() or ".." in member.parts:
                 raise ValueError(f"Unsafe ZIP member: {info.filename}")
+            if _is_macos_metadata_path(member):
+                continue
             out = target / member
             out.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(info) as src, out.open("wb") as dst:
                 shutil.copyfileobj(src, dst)
 
 
-
-def _asset_url(tag, base_url: str) -> str | None:
-    """Extract a download URL from href/data attributes/very small onclick wrappers."""
-    for key in ("href", "data-url", "data-href", "data-download", "data-download-url"):
-        value = tag.get(key)
-        if value and str(value).strip() and not str(value).strip().startswith("#"):
-            return urljoin(base_url, str(value).strip())
-
-    onclick = str(tag.get("onclick") or "")
-    m = re.search(r"""['"](https?://[^'"]+)['"]""", onclick)
-    if m:
-        return m.group(1)
-    return None
+def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
 
 
-def _otoiro_title_for_midi_anchor(anchor) -> str:
-    """
-    OTOIRO download cards contain the literal TITLE followed by the song title.
-    Search upward for the smallest card that contains TITLE and MIDI.
-    """
-    node = anchor
-    for _ in range(8):
-        node = getattr(node, "parent", None)
-        if node is None:
-            break
-        lines = [str(x).strip() for x in node.stripped_strings if str(x).strip()]
-        normalized = [x.upper() for x in lines]
-        if "TITLE" in normalized and any(x == "MIDI" for x in normalized):
-            idx = normalized.index("TITLE")
-            for candidate in lines[idx + 1:]:
-                uc = candidate.upper()
-                if uc not in {
-                    "THUMBNAIL", "DOWNLOAD", "MIDI", "INSTRUMENTAL",
-                    "LYRIC VIDEO（MP4）", "LYRIC VIDEO(MP4)",
-                } and not uc.startswith("MOVIE PJF") and "3D DANCE" not in uc:
-                    return candidate
-    return ""
+def normalized_title_key(value: str) -> str:
+    value = unicodedata.normalize("NFKC", value or "").casefold().strip()
+    value = re.sub(r"\s+", "", value)
+    value = re.sub(r"[‐‑‒–—―ー_\-・･:：!！?？'\"“”‘’()（）\[\]【】]", "", value)
+    return value
 
-
-def discover_otoiro_deco27_from_html(html_text: str) -> list[dict]:
-    soup = BeautifulSoup(html_text, "html.parser")
-    records: list[dict] = []
-    seen_urls: set[str] = set()
-
-    for anchor in soup.find_all(["a", "button"]):
-        label = " ".join(anchor.stripped_strings).strip()
-        if label.upper() != "MIDI":
-            continue
-
-        url = _asset_url(anchor, OTOIRO_SPECIAL_URL)
-        if not url or url in seen_urls:
-            continue
-
-        title = _otoiro_title_for_midi_anchor(anchor)
-        if title in OTOIRO_OTHER_CREATOR_TITLES:
-            continue
-
-        seen_urls.add(url)
-        ordinal = len(records) + 1
-        stable_id = f"deco27_{ordinal:03d}"
-        if title:
-            stable_id += "_" + slugify(title)
-
-        records.append({
-            "id": stable_id,
-            "title": title or f"OTOIRO DECO*27 MIDI {ordinal}",
-            "creator": "DECO*27 / OTOIRO",
-            "url": url,
-            "filename": f"{stable_id}.mid",
-            "license": "Official creator asset; use subject to OTOIRO SPECIAL Terms",
-            "source_page": OTOIRO_SPECIAL_URL,
-            "terms_url": OTOIRO_TERMS_URL,
-            "notes": (
-                "Official MIDI distributed on OTOIRO SPECIAL. "
-                "Keep source asset local unless the applicable terms permit redistribution."
-            ),
-            "preset": "otoiro-deco27",
-        })
-
-    return records
-
-
-def discover_otoiro_deco27(session: requests.Session, timeout: float) -> list[dict]:
-    r = session.get(OTOIRO_SPECIAL_URL, timeout=timeout)
-    r.raise_for_status()
-    return discover_otoiro_deco27_from_html(r.text)
-
-
-def _nearest_asset_context(anchor) -> tuple[str, str]:
-    """
-    Return (asset_text, detected_extension) from the smallest nearby Crusher
-    asset block. Download buttons are generic, so the surrounding label is used.
-    """
-    node = anchor
-    for _ in range(7):
-        node = getattr(node, "parent", None)
-        if node is None:
-            break
-        txt = " ".join(node.stripped_strings)
-        m = re.search(r"\b(VSQX|VSQ|USTX|UST|MIDI|MID)\b", txt, re.I)
-        if m:
-            raw = m.group(1).lower()
-            ext = ".mid" if raw == "midi" else "." + raw
-            return txt, ext
-    return "", ""
-
-
-def discover_crusher_from_html(html_text: str) -> list[dict]:
-    soup = BeautifulSoup(html_text, "html.parser")
-    candidates: dict[str, list[dict]] = {}
-
-    for anchor in soup.find_all(["a", "button"]):
-        label = " ".join(anchor.stripped_strings).strip().lower()
-        if "download" not in label:
-            continue
-
-        url = _asset_url(anchor, CRUSHER_RESOURCES_URL)
-        if not url:
-            continue
-
-        heading = anchor.find_previous(["h2", "h3"])
-        if heading is None:
-            continue
-        title = " ".join(heading.stripped_strings).strip()
-        if title not in CRUSHER_ORIGINAL_TITLES:
-            continue
-
-        asset_text, ext = _nearest_asset_context(anchor)
-        if not ext:
-            # URL filename can still expose the symbolic extension.
-            url_ext = Path(urlparse(url).path).suffix.lower()
-            if url_ext in SUPPORTED_EXTS:
-                ext = url_ext
-        if ext not in SUPPORTED_EXTS:
-            continue
-
-        sid = "crusher_" + slugify(title)
-        candidates.setdefault(title, []).append({
-            "id": sid,
-            "title": title,
-            "creator": "Crusher",
-            "url": url,
-            "filename": f"{sid}{ext}",
-            "license": "Official creator asset; use subject to Crusher Usage Guidelines",
-            "source_page": CRUSHER_RESOURCES_URL,
-            "terms_url": CRUSHER_USAGE_URL,
-            "notes": f"Official original-song symbolic asset. Asset context: {asset_text[:300]}",
-            "preset": "crusher",
-            "_ext": ext,
-        })
-
-    # Avoid counting MIDI + VSQX of the same song as independent training songs.
-    preference = {".vsqx": 6, ".vsq": 5, ".mid": 4, ".midi": 4, ".ustx": 3, ".ust": 2}
-    records = []
-    for title in sorted(candidates):
-        best = max(candidates[title], key=lambda x: preference.get(x["_ext"], 0))
-        best.pop("_ext", None)
-        records.append(best)
-    return records
-
-
-def discover_crusher(session: requests.Session, timeout: float) -> list[dict]:
-    r = session.get(CRUSHER_RESOURCES_URL, timeout=timeout)
-    r.raise_for_status()
-    return discover_crusher_from_html(r.text)
-
-
-def discover_preset_sources(presets: list[str], timeout: float) -> list[dict]:
-    expanded = []
-    for preset in presets:
-        if preset == "official":
-            expanded.extend(["otoiro-deco27", "crusher"])
-        else:
-            expanded.append(preset)
-    # Stable de-duplication while preserving requested order.
-    expanded = list(dict.fromkeys(expanded))
-
-    session = requests.Session()
-    session.headers.update({"User-Agent": "Scaleify-Vocaloid-Corpus-Builder/2.0"})
-
-    records: list[dict] = []
-    for preset in expanded:
-        if preset == "otoiro-deco27":
-            found = discover_otoiro_deco27(session, timeout)
-        elif preset == "crusher":
-            found = discover_crusher(session, timeout)
-        else:
-            raise ValueError(f"Unknown preset: {preset}")
-        print(f"Preset discovery: {preset}: {len(found)} symbolic asset(s)")
-        records.extend(found)
-
-    # URL is the strongest duplicate key; ID is fallback.
-    unique = {}
-    for rec in records:
-        unique[(rec.get("url") or "", rec.get("id") or "")] = rec
-    return list(unique.values())
-
-
-def _normalized_cloud_url(url: str) -> str:
-    """
-    Normalize simple direct-download hosts. Google Drive is handled separately
-    by gdown because creator links are often /file/d/.../view links.
-    """
-    parsed = urlparse(url)
-    if "dropbox.com" in parsed.netloc:
-        q = parse_qs(parsed.query)
-        q["dl"] = ["1"]
-        return urlunparse(parsed._replace(query=urlencode(q, doseq=True)))
-    return url
-
-
-def _download_asset(
-    session: requests.Session,
-    url: str,
-    path: Path,
-    timeout: float,
-) -> None:
-    tmp = path.with_suffix(path.suffix + ".part")
-    tmp.parent.mkdir(parents=True, exist_ok=True)
-
-    if "drive.google.com" in url or "docs.google.com" in url:
-        try:
-            import gdown
-        except ImportError as exc:
-            raise RuntimeError(
-                "Google Drive asset detected. Install requirements-vocaloid-dataset.txt "
-                "(gdown is required)."
-            ) from exc
-        result = gdown.download(url=url, output=str(tmp), quiet=False, fuzzy=True)
-        if not result or not tmp.exists():
-            raise RuntimeError(f"gdown failed for {url}")
-        tmp.replace(path)
-        return
-
-    direct = _normalized_cloud_url(url)
-    with session.get(direct, timeout=timeout, stream=True, allow_redirects=True) as r:
-        r.raise_for_status()
-        with tmp.open("wb") as f:
-            for chunk in r.iter_content(1024 * 1024):
-                if chunk:
-                    f.write(chunk)
-    tmp.replace(path)
-
-
-def provenance_for_path(path: Path, records: list[dict]) -> dict:
-    resolved = path.resolve()
-    for rec in records:
-        root_text = rec.get("extracted_to")
-        if not root_text:
-            continue
-        root = Path(root_text).resolve()
-        try:
-            resolved.relative_to(root)
-            return rec
-        except ValueError:
-            pass
-    return {}
 
 def read_sources_csv(path: Path) -> list[dict]:
     with path.open("r", newline="", encoding="utf-8-sig") as f:
@@ -924,28 +673,393 @@ def read_sources_csv(path: Path) -> list[dict]:
     return out
 
 
+def _asset_url(tag, base_url: str) -> str | None:
+    node = tag
+    for _ in range(5):
+        if node is None:
+            break
+        for key in (
+            "href", "data-url", "data-href", "data-download",
+            "data-download-url", "data-file", "data-src",
+        ):
+            value = node.get(key) if hasattr(node, "get") else None
+            if value:
+                value = str(value).strip()
+                if value and not value.startswith("#") and not value.lower().startswith("javascript:"):
+                    return urljoin(base_url, value)
+
+        onclick = str(node.get("onclick") or "") if hasattr(node, "get") else ""
+        for match in re.finditer(r'''["']([^"']+)["']''', onclick):
+            value = match.group(1).strip()
+            if not value or value.startswith("#"):
+                continue
+            if value.startswith(("http://", "https://", "/", "./", "../")):
+                return urljoin(base_url, value)
+
+        node = getattr(node, "parent", None)
+    return None
+
+def _otoiro_title_for_midi_anchor(anchor) -> str:
+    node = anchor
+    for _ in range(9):
+        node = getattr(node, "parent", None)
+        if node is None:
+            break
+        lines = [str(x).strip() for x in node.stripped_strings if str(x).strip()]
+        upper = [x.upper() for x in lines]
+        if "TITLE" in upper and "MIDI" in upper:
+            idx = upper.index("TITLE")
+            for candidate in lines[idx + 1:]:
+                uc = candidate.upper()
+                if uc not in {
+                    "THUMBNAIL", "DOWNLOAD", "MIDI", "INSTRUMENTAL",
+                    "LYRIC VIDEO（MP4）", "LYRIC VIDEO(MP4)",
+                } and not uc.startswith("MOVIE PJF") and "3D DANCE" not in uc:
+                    return candidate
+    return ""
+
+
+def discover_otoiro_deco27_from_html(html_text: str) -> list[dict]:
+    soup = BeautifulSoup(html_text, "html.parser")
+    candidates: list[dict] = []
+
+    for anchor in soup.find_all(["a", "button"]):
+        if " ".join(anchor.stripped_strings).strip().upper() != "MIDI":
+            continue
+        url = _asset_url(anchor, OTOIRO_SPECIAL_URL)
+        if not url:
+            continue
+        title = _otoiro_title_for_midi_anchor(anchor)
+        if title in OTOIRO_OTHER_CREATOR_TITLES:
+            continue
+        candidates.append({
+            "title": title or "Untitled OTOIRO MIDI",
+            "creator": "DECO*27 / OTOIRO",
+            "url": url,
+            "license": "Official creator asset; use subject to OTOIRO SPECIAL Terms",
+            "source_page": OTOIRO_SPECIAL_URL,
+            "terms_url": OTOIRO_TERMS_URL,
+            "notes": "Official MIDI distributed on OTOIRO SPECIAL.",
+            "preset": "otoiro-deco27",
+        })
+
+    # One visible composition title = one training source.
+    by_title: dict[str, dict] = {}
+    for rec in candidates:
+        key = normalized_title_key(rec["title"]) or rec["url"]
+        by_title.setdefault(key, rec)
+
+    records = []
+    for ordinal, rec in enumerate(by_title.values(), start=1):
+        sid = f"deco27_{ordinal:03d}_{slugify(rec['title'])}"
+        records.append({**rec, "id": sid, "filename": f"{sid}.mid"})
+    return records
+
+
+def discover_otoiro_deco27(session: requests.Session, timeout: float) -> list[dict]:
+    r = session.get(OTOIRO_SPECIAL_URL, timeout=timeout)
+    r.raise_for_status()
+    return discover_otoiro_deco27_from_html(r.text)
+
+
+
+def _decode_possible_base64_path(value: str) -> str | None:
+    if not value:
+        return None
+
+    raw = value.strip()
+    parsed = urlparse(raw)
+    token = parsed.path.rstrip("/").split("/")[-1] if parsed.path else raw
+
+    if "." in token or len(token) < 12:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9_\-+/=]+", token):
+        return None
+
+    for candidate in (token, token.replace("-", "+").replace("_", "/")):
+        try:
+            padded = candidate + "=" * ((4 - len(candidate) % 4) % 4)
+            decoded = base64.b64decode(padded, validate=False).decode("utf-8")
+        except Exception:
+            continue
+
+        decoded = decoded.strip()
+        if decoded and any(
+            decoded.lower().endswith(ext)
+            for ext in (
+                ".wav", ".mp3", ".flac", ".jpg", ".jpeg", ".png", ".txt",
+                ".vsqx", ".vsq", ".ustx", ".ust", ".mid", ".midi", ".svp",
+            )
+        ):
+            return decoded
+
+    return None
+
+
+def _crusher_direct_asset_info(control) -> tuple[str | None, str | None, str]:
+    context_parts = []
+    node = control
+
+    for _depth in range(3):
+        if node is None:
+            break
+
+        if hasattr(node, "stripped_strings"):
+            context_parts.extend(
+                str(x).strip() for x in node.stripped_strings if str(x).strip()
+            )
+
+        for key in (
+            "href", "data-url", "data-href", "data-download",
+            "data-download-url", "data-file", "data-src",
+        ):
+            value = node.get(key) if hasattr(node, "get") else None
+            if not value:
+                continue
+
+            raw = str(value).strip()
+            if not raw or raw.startswith("#") or raw.lower().startswith("javascript:"):
+                continue
+
+            decoded = _decode_possible_base64_path(raw)
+            if decoded:
+                ext = Path(decoded).suffix.lower()
+                if ext not in SUPPORTED_EXTS:
+                    return None, None, " ".join(dict.fromkeys(context_parts))
+                # Symbolic token, but still browser-only. Do not fake a direct URL.
+                return None, ext, " ".join(dict.fromkeys(context_parts))
+
+            direct = urljoin(CRUSHER_RESOURCES_URL, raw)
+            ext = Path(urlparse(direct).path).suffix.lower()
+            if ext in SUPPORTED_EXTS:
+                return direct, ext, " ".join(dict.fromkeys(context_parts))
+
+        node = getattr(node, "parent", None)
+
+    return None, None, " ".join(dict.fromkeys(context_parts))
+
+
+def _nearest_asset_context(anchor) -> tuple[str, str]:
+    node = anchor
+    for _ in range(8):
+        node = getattr(node, "parent", None)
+        if node is None:
+            break
+        txt = " ".join(node.stripped_strings)
+        m = re.search(r"\b(VSQX|VSQ|USTX|UST|MIDI|MID)\b", txt, re.I)
+        if m:
+            raw = m.group(1).lower()
+            ext = ".mid" if raw == "midi" else "." + raw
+            return txt, ext
+    return "", ""
+
+
+def _add_crusher_candidate(candidates, title: str, url: str, ext: str, context: str) -> None:
+    if title not in CRUSHER_ORIGINAL_TITLES or ext not in SUPPORTED_EXTS:
+        return
+    sid = "crusher_" + slugify(title)
+    candidates.setdefault(title, []).append({
+        "id": sid,
+        "title": title,
+        "creator": "Crusher",
+        "url": url,
+        "filename": f"{sid}{ext}",
+        "license": "Official creator asset; use subject to Crusher Usage Guidelines",
+        "source_page": CRUSHER_RESOURCES_URL,
+        "terms_url": CRUSHER_USAGE_URL,
+        "notes": f"Official original-song symbolic asset. {context[:300]}",
+        "preset": "crusher",
+        "_ext": ext,
+    })
+
+
+
+def discover_crusher_from_html(html_text: str) -> list[dict]:
+    soup = BeautifulSoup(html_text, "html.parser")
+    candidates: dict[str, list[dict]] = {}
+    opaque_symbolic_seen: list[tuple[str, str]] = []
+
+    for control in soup.find_all(["a", "button"]):
+        heading = control.find_previous(["h2", "h3"])
+        if heading is None:
+            continue
+
+        title = " ".join(heading.stripped_strings).strip()
+        if title not in CRUSHER_ORIGINAL_TITLES:
+            continue
+
+        direct_url, ext, context = _crusher_direct_asset_info(control)
+
+        if direct_url and ext in SUPPORTED_EXTS:
+            _add_crusher_candidate(candidates, title, direct_url, ext, context)
+            continue
+
+        if ext in SUPPORTED_EXTS and not direct_url:
+            opaque_symbolic_seen.append((title, ext))
+
+    # Strict raw-HTML fallback:
+    # only URLs that themselves end with a supported symbolic extension.
+    raw = html_text.replace("\\/", "/").replace("\\u0026", "&")
+    url_pattern = re.compile(r"https?://[^\"'<>\\\s]+", re.I)
+
+    for title in CRUSHER_ORIGINAL_TITLES:
+        for tm in re.finditer(re.escape(title), raw, flags=re.I):
+            section = raw[tm.start():min(len(raw), tm.start() + 12000)]
+
+            for um in url_pattern.finditer(section):
+                value = um.group(0).rstrip(",)]}")
+                ext = Path(urlparse(value).path).suffix.lower()
+                if ext not in SUPPORTED_EXTS:
+                    continue
+
+                nearby = section[
+                    max(0, um.start() - 300):
+                    min(len(section), um.end() + 300)
+                ]
+                _add_crusher_candidate(
+                    candidates,
+                    title,
+                    value,
+                    ext,
+                    re.sub(
+                        r"\s+",
+                        " ",
+                        BeautifulSoup(nearby, "html.parser").get_text(" ", strip=True),
+                    ),
+                )
+
+    records = []
+    for title in sorted(candidates):
+        unique = {}
+        for item in candidates[title]:
+            unique[(item["url"], item["_ext"])] = item
+
+        best = max(
+            unique.values(),
+            key=lambda x: FORMAT_PRIORITY.get(x["_ext"], 0),
+        )
+        best = dict(best)
+        best.pop("_ext", None)
+        records.append(best)
+
+    if opaque_symbolic_seen and not records:
+        print(
+            "WARNING: Crusher symbolic assets were found, but the current site "
+            "exposes them through browser-only opaque download tokens. "
+            "They were skipped instead of constructing invalid 404 URLs.",
+            file=sys.stderr,
+        )
+        for title, ext in sorted(set(opaque_symbolic_seen)):
+            print(
+                f"    Crusher browser-only asset: {title} ({ext})",
+                file=sys.stderr,
+            )
+
+    return records
+
+
+def discover_crusher(session: requests.Session, timeout: float) -> list[dict]:
+    r = session.get(CRUSHER_RESOURCES_URL, timeout=timeout)
+    r.raise_for_status()
+    return discover_crusher_from_html(r.text)
+
+
+def discover_preset_sources(presets: list[str], timeout: float) -> list[dict]:
+    expanded: list[str] = []
+    for preset in presets:
+        expanded.extend(["otoiro-deco27", "crusher"] if preset == "official" else [preset])
+    expanded = list(dict.fromkeys(expanded))
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Scaleify-Vocaloid-Corpus-Builder/4.1"})
+    records: list[dict] = []
+    for preset in expanded:
+        if preset == "otoiro-deco27":
+            found = discover_otoiro_deco27(session, timeout)
+        elif preset == "crusher":
+            found = discover_crusher(session, timeout)
+        else:
+            raise ValueError(f"Unknown preset: {preset}")
+        print(f"Preset discovery: {preset}: {len(found)} symbolic asset(s)")
+        if preset == "crusher" and not found:
+            print(
+                "WARNING: Crusher preset returned 0 assets. "
+                "The resources page layout may have changed; Crusher will not be silently assumed present.",
+                file=sys.stderr,
+            )
+        records.extend(found)
+
+    unique: dict[tuple[str, str], dict] = {}
+    for rec in records:
+        unique[(rec.get("url", ""), rec.get("id", ""))] = rec
+    return list(unique.values())
+
+
+def _normalized_cloud_url(url: str) -> str:
+    parsed = urlparse(url)
+    if "dropbox.com" in parsed.netloc:
+        q = parse_qs(parsed.query)
+        q["dl"] = ["1"]
+        return urlunparse(parsed._replace(query=urlencode(q, doseq=True)))
+    return url
+
+
+def _download_asset(session: requests.Session, url: str, path: Path, timeout: float) -> None:
+    tmp = path.with_suffix(path.suffix + ".part")
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+
+    if "drive.google.com" in url or "docs.google.com" in url:
+        try:
+            import gdown
+        except ImportError as exc:
+            raise RuntimeError(
+                "Google Drive asset detected. Install requirements-vocaloid-dataset.txt."
+            ) from exc
+        result = gdown.download(url=url, output=str(tmp), quiet=False, fuzzy=True)
+        if not result or not tmp.exists():
+            raise RuntimeError(f"gdown failed for {url}")
+        tmp.replace(path)
+        return
+
+    with session.get(
+        _normalized_cloud_url(url),
+        timeout=timeout,
+        stream=True,
+        allow_redirects=True,
+    ) as r:
+        r.raise_for_status()
+        with tmp.open("wb") as f:
+            for chunk in r.iter_content(1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+    tmp.replace(path)
+
+
 def download_manifest_sources(
     records: list[dict],
     source_dir: Path,
     timeout: float,
     force: bool,
 ) -> list[dict]:
+    """
+    `_downloads` is cache only. Canonical project files are exposed under
+    `_source/<source-id>` and only that tree is used for training.
+    """
     session = requests.Session()
-    session.headers.update({"User-Agent": "Scaleify-Vocaloid-Corpus-Builder/1.0"})
+    session.headers.update({"User-Agent": "Scaleify-Vocaloid-Corpus-Builder/4.1"})
     downloads = source_dir / "_downloads"
     extracted = source_dir / "_source"
     downloads.mkdir(parents=True, exist_ok=True)
     extracted.mkdir(parents=True, exist_ok=True)
 
     provenance = []
-
     for i, rec in enumerate(records, start=1):
         url = rec["url"]
         parsed = urlparse(url)
         sid = slugify(rec.get("id") or Path(parsed.path).stem or f"source_{i}")
         candidate = Path(str(rec.get("filename") or "")).name
         if not candidate:
-            candidate = Path(parsed.path).name or f"source_{i}"
+            candidate = Path(parsed.path).name or f"{sid}.bin"
 
         ext = Path(candidate).suffix.lower()
         if ext not in SUPPORTED_EXTS and ext != ".zip" and ext not in CONVERT_WITH_UTAFORMATIX:
@@ -954,45 +1068,143 @@ def download_manifest_sources(
         local = downloads / candidate
         if force or not local.exists():
             print(f"Downloading [{i}/{len(records)}] {rec.get('title') or sid}")
-            _download_asset(session, url, local, timeout)
+            try:
+                _download_asset(session, url, local, timeout)
+            except requests.RequestException as exc:
+                print(
+                    f"WARNING: source download skipped: {rec.get('title') or sid}: {exc}",
+                    file=sys.stderr,
+                )
+                provenance.append({
+                    **rec,
+                    "download_failed": True,
+                    "download_error": f"{type(exc).__name__}: {exc}",
+                })
+                continue
 
         dest_root = extracted / sid
+        if force and dest_root.exists():
+            shutil.rmtree(dest_root)
         dest_root.mkdir(parents=True, exist_ok=True)
 
         if zipfile.is_zipfile(local):
-            if force:
-                for p in dest_root.iterdir():
-                    if p.is_dir():
-                        shutil.rmtree(p)
-                    else:
-                        p.unlink()
-            safe_extract_zip(local, dest_root)
+            if force or not any(dest_root.iterdir()):
+                safe_extract_zip(local, dest_root)
         else:
-            out = dest_root / local.name
+            out = dest_root / candidate
             if force or not out.exists():
                 shutil.copy2(local, out)
 
         provenance.append({
             **rec,
             "downloaded_file": str(local),
+            "download_sha256": sha256_file(local),
             "extracted_to": str(dest_root),
         })
-
     return provenance
 
 
-def discover_projects(source_dir: Path) -> tuple[list[Path], list[Path]]:
-    supported = []
-    convertable = []
+def _iter_local_projects(source_dir: Path):
     for p in source_dir.rglob("*"):
         if not p.is_file():
+            continue
+        rel = p.relative_to(source_dir)
+        if any(part in INTERNAL_SOURCE_DIRS for part in rel.parts):
+            continue
+        yield p
+
+
+def _project_files_under(root: Path) -> tuple[list[Path], list[Path]]:
+    supported: list[Path] = []
+    convertable: list[Path] = []
+    if not root.exists():
+        return supported, convertable
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        try:
+            rel = p.relative_to(root)
+        except ValueError:
+            rel = p
+        if _is_macos_metadata_path(rel):
             continue
         ext = p.suffix.lower()
         if ext in SUPPORTED_EXTS:
             supported.append(p)
         elif ext in CONVERT_WITH_UTAFORMATIX:
             convertable.append(p)
-    return sorted(supported), sorted(convertable)
+    return supported, convertable
+
+
+def discover_projects(
+    source_dir: Path,
+    downloaded_provenance: list[dict] | None = None,
+) -> tuple[list[Path], list[Path], list[dict]]:
+    """
+    Canonical discovery:
+      1) local files excluding `_downloads` and `_source`;
+      2) downloaded records only from `_source/<id>`;
+      3) max one symbolic file per downloaded source record;
+      4) exact SHA-256 de-duplication.
+    """
+    supported: list[Path] = []
+    convertable: list[Path] = []
+    duplicate_report: list[dict] = []
+
+    for p in _iter_local_projects(source_dir):
+        ext = p.suffix.lower()
+        if ext in SUPPORTED_EXTS:
+            supported.append(p)
+        elif ext in CONVERT_WITH_UTAFORMATIX:
+            convertable.append(p)
+
+    for rec in downloaded_provenance or []:
+        root_text = rec.get("extracted_to")
+        if not root_text:
+            continue
+        found, needs_conversion = _project_files_under(Path(root_text))
+        convertable.extend(needs_conversion)
+        if not found:
+            continue
+
+        found = sorted(
+            found,
+            key=lambda p: (
+                -FORMAT_PRIORITY.get(p.suffix.lower(), 0),
+                -p.stat().st_size,
+                str(p),
+            ),
+        )
+        chosen = found[0]
+        supported.append(chosen)
+
+        for skipped in found[1:]:
+            duplicate_report.append({
+                "reason": "multiple_symbolic_files_in_one_source",
+                "kept": str(chosen),
+                "skipped": str(skipped),
+                "source_id": rec.get("id", ""),
+                "title": rec.get("title", ""),
+            })
+
+    by_hash: dict[str, Path] = {}
+    unique: list[Path] = []
+    for p in sorted(supported):
+        digest = sha256_file(p)
+        if digest in by_hash:
+            duplicate_report.append({
+                "reason": "identical_sha256",
+                "kept": str(by_hash[digest]),
+                "skipped": str(p),
+                "sha256": digest,
+            })
+            continue
+        by_hash[digest] = p
+        unique.append(p)
+
+    convertable = sorted(dict.fromkeys(p.resolve() for p in convertable))
+    return unique, convertable, duplicate_report
+
 
 
 def make_unique_id(path: Path, source_dir: Path, used: set[str]) -> str:
@@ -1006,6 +1218,116 @@ def make_unique_id(path: Path, source_dir: Path, used: set[str]) -> str:
     return value
 
 
+def provenance_for_path(path: Path, records: list[dict]) -> dict:
+    resolved = path.resolve()
+    for rec in records:
+        root_text = rec.get("extracted_to")
+        if not root_text:
+            continue
+        root = Path(root_text).resolve()
+        try:
+            resolved.relative_to(root)
+            return rec
+        except ValueError:
+            pass
+    return {}
+
+
+def clean_generated_output(output: Path) -> None:
+    # Remove generated artifacts so old `_2`/`_3` WAVs cannot survive an upgrade.
+    for p in output.glob("*.wav"):
+        p.unlink(missing_ok=True)
+    for name in ("metadata.csv", "manifest.json", "failures.json", "needs_utaformatix.txt"):
+        (output / name).unlink(missing_ok=True)
+    symbolic = output / "_symbolic"
+    if symbolic.exists():
+        for p in symbolic.glob("*.csv"):
+            p.unlink(missing_ok=True)
+
+
+@dataclass
+class PreparedSong:
+    song_id: str
+    path: Path
+    project: Project
+    track: Track
+    scores: list[TrackScore]
+    notes: list[Note]
+    provenance: dict
+    marker_removed: dict[int, int] = field(default_factory=dict)
+
+
+def detect_common_marker_pitches(
+    songs: list[PreparedSong],
+    min_song_fraction: float = 0.85,
+    max_median_event_share: float = 0.02,
+    min_median_extreme_gap: float = 9.0,
+) -> list[dict]:
+    if len(songs) < 4:
+        return []
+
+    reports = []
+    total = len(songs)
+    for pitch in range(128):
+        containing = []
+        shares = []
+        gaps = []
+        extreme_hits = 0
+        event_total = 0
+
+        for song in songs:
+            count = sum(1 for n in song.notes if n.pitch == pitch)
+            if count == 0:
+                continue
+            containing.append(song.song_id)
+            shares.append(count / max(1, len(song.notes)))
+            event_total += count
+
+            unique = sorted(set(n.pitch for n in song.notes))
+            if pitch == unique[0]:
+                extreme_hits += 1
+                if len(unique) > 1:
+                    gaps.append(unique[1] - pitch)
+            elif pitch == unique[-1]:
+                extreme_hits += 1
+                if len(unique) > 1:
+                    gaps.append(pitch - unique[-2])
+
+        if not containing:
+            continue
+
+        song_fraction = len(containing) / total
+        extreme_fraction = extreme_hits / len(containing)
+        median_share = float(np.median(shares)) if shares else 1.0
+        median_gap = float(np.median(gaps)) if gaps else 0.0
+
+        if (
+            song_fraction >= min_song_fraction
+            and extreme_fraction >= 0.90
+            and median_share <= max_median_event_share
+            and median_gap >= min_median_extreme_gap
+        ):
+            reports.append({
+                "pitch_midi": pitch,
+                "songs_containing": len(containing),
+                "song_fraction": round(song_fraction, 6),
+                "extreme_fraction": round(extreme_fraction, 6),
+                "median_event_share": round(median_share, 6),
+                "median_extreme_gap_semitones": round(median_gap, 3),
+                "events_total": event_total,
+                "song_ids": containing,
+            })
+    return reports
+
+
+def remove_marker_pitches(song: PreparedSong, pitches: set[int]) -> None:
+    removed = Counter(n.pitch for n in song.notes if n.pitch in pitches)
+    if not removed:
+        return
+    song.notes = normalize_notes([n for n in song.notes if n.pitch not in pitches])
+    song.marker_removed = dict(sorted(removed.items()))
+
+
 def metadata_row_for(
     song_id: str,
     project: Project,
@@ -1015,6 +1337,7 @@ def metadata_row_for(
     wav_path: Path,
     bpm: float,
     provenance: dict | None = None,
+    marker_removed: dict[int, int] | None = None,
 ) -> dict:
     score_map = {s.track.index: s for s in scores}
     s = score_map[chosen.index]
@@ -1022,10 +1345,12 @@ def metadata_row_for(
     duration_s = total_tick * (60.0 / bpm) / max(1, project.resolution)
 
     provenance = provenance or {}
+    marker_removed = marker_removed or {}
     return {
         "id": song_id,
         "filename": wav_path.name,
         "source_file": str(project.path),
+        "source_sha256": sha256_file(project.path),
         "source_title": provenance.get("title", ""),
         "source_creator": provenance.get("creator", ""),
         "source_license": provenance.get("license", ""),
@@ -1045,6 +1370,7 @@ def metadata_row_for(
         "pitch_max_midi": max(n.pitch for n in notes),
         "duration_seconds": round(duration_s, 4),
         "render_bpm": bpm,
+        "marker_notes_removed": {str(k): v for k, v in marker_removed.items()},
         "candidate_tracks": [
             {
                 "index": x.track.index,
@@ -1061,13 +1387,13 @@ def metadata_row_for(
 
 def write_metadata_csv(path: Path, rows: list[dict]) -> None:
     fields = [
-        "id", "filename", "source_file",
-        "source_title", "source_creator", "source_license", "source_page",
-        "source_url", "terms_url", "preset",
+        "id", "filename", "source_file", "source_sha256",
+        "source_title", "source_creator", "source_license",
+        "source_page", "source_url", "terms_url", "preset",
         "format", "resolution",
         "track_index", "track_name", "track_monophony", "track_count",
         "note_events", "pitch_min_midi", "pitch_max_midi",
-        "duration_seconds", "render_bpm",
+        "duration_seconds", "render_bpm", "marker_notes_removed",
     ]
     with path.open("w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -1099,23 +1425,17 @@ def main() -> None:
         action="append",
         choices=["otoiro-deco27", "crusher", "official"],
         default=[],
-        help=(
-            "Discover official creator-distributed symbolic assets. Repeatable. "
-            "'official' expands to OTOIRO DECO*27 + Crusher."
-        ),
+        help="'official' = OTOIRO DECO*27 + Crusher.",
     )
     parser.add_argument(
         "--accept-source-terms",
         action="store_true",
-        help=(
-            "Required before preset asset downloads. Confirms that you reviewed "
-            "the source-site terms; it does not change the underlying license."
-        ),
+        help="Required before downloading preset assets.",
     )
     parser.add_argument(
         "--discover-only",
         action="store_true",
-        help="Discover preset assets and print provenance without downloading them.",
+        help="List preset assets without downloading.",
     )
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--song", default=None, help="Generate only this normalized song id.")
@@ -1131,6 +1451,23 @@ def main() -> None:
     parser.add_argument("--articulation-gap-ms", type=float, default=DEFAULT_GAP_MS)
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--clean-output",
+        action="store_true",
+        help="Remove previously generated WAV/metadata artifacts before rendering.",
+    )
+    parser.add_argument(
+        "--marker-filter",
+        choices=["auto", "off"],
+        default="auto",
+        help="Conservatively detect and remove corpus-wide sentinel/key-switch notes.",
+    )
+    parser.add_argument(
+        "--marker-song-fraction",
+        type=float,
+        default=0.85,
+        help="Minimum song fraction for auto marker detection (default: 0.85).",
+    )
     args = parser.parse_args()
 
     if args.min_notes < 1:
@@ -1141,6 +1478,8 @@ def main() -> None:
         parser.error("--render-bpm must be > 0")
     if args.articulation_gap_ms < 0:
         parser.error("--articulation-gap-ms must be >= 0")
+    if not 0.5 <= args.marker_song_fraction <= 1.0:
+        parser.error("--marker-song-fraction must be between 0.5 and 1.0")
 
     source_dir = args.source_dir
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -1149,7 +1488,10 @@ def main() -> None:
     symbolic_dir = output / "_symbolic"
     symbolic_dir.mkdir(parents=True, exist_ok=True)
 
-    downloaded_provenance = []
+    if args.clean_output:
+        clean_generated_output(output)
+
+    downloaded_provenance: list[dict] = []
     source_records: list[dict] = []
 
     if args.preset:
@@ -1159,15 +1501,11 @@ def main() -> None:
             print("Discovered official symbolic assets")
             print("-----------------------------------")
             for rec in preset_records:
-                print(
-                    f"{rec.get('preset',''):15} "
-                    f"{rec.get('id',''):36} "
-                    f"{rec.get('title','')}"
-                )
+                print(f"{rec.get('preset',''):15} {rec.get('title','')}")
+                print(f"    id:     {rec.get('id','')}")
                 print(f"    source: {rec.get('source_page','')}")
                 print(f"    terms:  {rec.get('terms_url','')}")
                 print(f"    asset:  {rec.get('url','')}")
-            print()
             print(f"Total: {len(preset_records)}")
             return
 
@@ -1175,25 +1513,57 @@ def main() -> None:
             raise SystemExit(
                 "Preset download requires --accept-source-terms. Review:\n"
                 f"  OTOIRO:  {OTOIRO_TERMS_URL}\n"
-                f"  Crusher: {CRUSHER_USAGE_URL}\n"
-                "Use --discover-only to inspect assets without downloading."
+                f"  Crusher: {CRUSHER_USAGE_URL}"
             )
         source_records.extend(preset_records)
 
     if args.sources_csv is not None:
         source_records.extend(read_sources_csv(args.sources_csv))
 
+    # Source-record de-duplication by URL and creator/title.
+    deduped: list[dict] = []
+    seen_urls: set[str] = set()
+    seen_titles: set[tuple[str, str]] = set()
+    source_record_duplicates: list[dict] = []
+
+    for rec in source_records:
+        url = rec.get("url", "")
+        title_key = (
+            normalized_title_key(rec.get("creator", "")),
+            normalized_title_key(rec.get("title", "")),
+        )
+        if url and url in seen_urls:
+            source_record_duplicates.append({
+                "reason": "duplicate_source_url",
+                "title": rec.get("title", ""),
+                "url": url,
+            })
+            continue
+        if all(title_key) and title_key in seen_titles:
+            source_record_duplicates.append({
+                "reason": "duplicate_creator_title",
+                "creator": rec.get("creator", ""),
+                "title": rec.get("title", ""),
+                "url": url,
+            })
+            continue
+
+        if url:
+            seen_urls.add(url)
+        if all(title_key):
+            seen_titles.add(title_key)
+        deduped.append(rec)
+
+    source_records = deduped
     if source_records:
-        # Stable de-duplication by URL + requested filename.
-        deduped = {}
-        for rec in source_records:
-            deduped[(rec.get("url", ""), rec.get("filename", ""))] = rec
-        source_records = list(deduped.values())
         downloaded_provenance = download_manifest_sources(
             source_records, source_dir, args.timeout, args.force
         )
 
-    project_paths, convertable = discover_projects(source_dir)
+    project_paths, convertable, project_duplicates = discover_projects(
+        source_dir, downloaded_provenance
+    )
+    duplicate_report = source_record_duplicates + project_duplicates
     if not project_paths:
         raise SystemExit(
             f"No supported project files found under {source_dir}. "
@@ -1205,17 +1575,17 @@ def main() -> None:
     for project_path in project_paths:
         prov = provenance_for_path(project_path, downloaded_provenance)
         preferred = slugify(prov.get("id", "")) if prov.get("id") else ""
+
         if preferred:
             song_id = preferred
-            candidate = song_id
-            suffix = 2
-            while candidate in used:
-                candidate = f"{song_id}_{suffix}"
-                suffix += 1
-            used.add(candidate)
-            song_id = candidate
+            n = 2
+            while song_id in used:
+                song_id = f"{preferred}_{n}"
+                n += 1
+            used.add(song_id)
         else:
             song_id = make_unique_id(project_path, source_dir, used)
+
         indexed.append((song_id, project_path))
 
     if args.song:
@@ -1226,64 +1596,27 @@ def main() -> None:
 
     rows = []
     failures = []
+    prepared: list[PreparedSong] = []
 
-    for ordinal, (song_id, path) in enumerate(indexed, start=1):
+    for song_id, path in indexed:
         try:
             project = parse_project(path)
             track, scores = select_track(project, args.track_strategy, args.track_index)
             notes = normalize_notes(monophonize(track.notes))
-
             if len(notes) < args.min_notes:
                 raise ValueError(
                     f"Only {len(notes)} usable notes after monophonic reduction "
                     f"(< --min-notes {args.min_notes})"
                 )
-
-            if args.list:
-                print(
-                    f"{song_id:32} {project.format:6} "
-                    f"tracks={len(project.tracks):2d} "
-                    f"selected={track.index}:{track.name!r} notes={len(notes)}"
-                )
-                for s in scores[:5]:
-                    print(
-                        f"    track {s.track.index:2d} "
-                        f"notes={len(s.track.notes):4d} mono={s.monophony:.3f} "
-                        f"score={s.score:.2f} name={s.track.name!r}"
-                    )
-                continue
-
-            print(f"[{ordinal:03d}/{len(indexed):03d}] {song_id} <- {path.name}")
-
-            wav_path = output / f"{song_id}.wav"
-            symbolic_path = symbolic_dir / f"{song_id}.csv"
-
-            if args.force or not wav_path.exists():
-                audio = render_notes(
-                    notes,
-                    resolution=project.resolution,
-                    sr=args.sample_rate,
-                    bpm=args.render_bpm,
-                    gap_ms=args.articulation_gap_ms,
-                )
-                sf.write(wav_path, audio, args.sample_rate, subtype="PCM_16")
-
-            write_symbolic_csv(symbolic_path, notes, project.resolution, args.render_bpm)
-
-            prov = provenance_for_path(path, downloaded_provenance)
-            row = metadata_row_for(
-                song_id, project, track, scores, notes, wav_path, args.render_bpm,
-                provenance=prov,
-            )
-            rows.append(row)
-
-            print(
-                f"    {project.format} track={track.index}:{track.name!r} "
-                f"notes={len(notes)} mono={row['track_monophony']:.3f} "
-                f"range={row['pitch_min_midi']}-{row['pitch_max_midi']} "
-                f"-> {wav_path.name}"
-            )
-
+            prepared.append(PreparedSong(
+                song_id=song_id,
+                path=path,
+                project=project,
+                track=track,
+                scores=scores,
+                notes=notes,
+                provenance=provenance_for_path(path, downloaded_provenance),
+            ))
         except Exception as exc:
             failures.append({
                 "id": song_id,
@@ -1291,6 +1624,105 @@ def main() -> None:
                 "error": f"{type(exc).__name__}: {exc}",
             })
             print(f"    [FAILED] {path.name}: {type(exc).__name__}: {exc}")
+
+    marker_report: list[dict] = []
+    if args.marker_filter == "auto":
+        # Detect source-specific sentinels per preset/provider group. A marker
+        # used by OTOIRO must not cause the same pitch to be deleted from a
+        # separate Crusher/local corpus where it may be a legitimate note.
+        marker_groups: dict[str, list[PreparedSong]] = {}
+        for song in prepared:
+            group = (
+                song.provenance.get("preset")
+                or song.provenance.get("source_page")
+                or "__local__"
+            )
+            marker_groups.setdefault(str(group), []).append(song)
+
+        for group, group_songs in marker_groups.items():
+            detected = detect_common_marker_pitches(
+                group_songs,
+                min_song_fraction=args.marker_song_fraction,
+            )
+            marker_pitches = {int(item["pitch_midi"]) for item in detected}
+            for item in detected:
+                item["group"] = group
+                marker_report.append(item)
+            if marker_pitches:
+                print(f"==> Auto marker filter detected for {group}:")
+                for item in detected:
+                    print(
+                        f"    MIDI {item['pitch_midi']}: "
+                        f"songs={item['songs_containing']}/{len(group_songs)} "
+                        f"median_share={item['median_event_share']:.4f} "
+                        f"median_gap={item['median_extreme_gap_semitones']:.1f} st"
+                    )
+                for song in group_songs:
+                    remove_marker_pitches(song, marker_pitches)
+
+    if args.list:
+        for song in prepared:
+            print(
+                f"{song.song_id:32} {song.project.format:6} "
+                f"tracks={len(song.project.tracks):2d} "
+                f"selected={song.track.index}:{song.track.name!r} notes={len(song.notes)} "
+                f"marker_removed={song.marker_removed}"
+            )
+            for sc in song.scores[:5]:
+                print(
+                    f"    track {sc.track.index:2d} notes={len(sc.track.notes):4d} "
+                    f"mono={sc.monophony:.3f} score={sc.score:.2f} name={sc.track.name!r}"
+                )
+    else:
+        for ordinal, song in enumerate(prepared, start=1):
+            if len(song.notes) < args.min_notes:
+                failures.append({
+                    "id": song.song_id,
+                    "source_file": str(song.path),
+                    "error": "Too few notes after marker filtering",
+                })
+                continue
+
+            print(f"[{ordinal:03d}/{len(prepared):03d}] {song.song_id} <- {song.path.name}")
+            wav_path = output / f"{song.song_id}.wav"
+            symbolic_path = symbolic_dir / f"{song.song_id}.csv"
+
+            if args.force or args.clean_output or song.marker_removed or not wav_path.exists():
+                audio = render_notes(
+                    song.notes,
+                    resolution=song.project.resolution,
+                    sr=args.sample_rate,
+                    bpm=args.render_bpm,
+                    gap_ms=args.articulation_gap_ms,
+                )
+                sf.write(wav_path, audio, args.sample_rate, subtype="PCM_16")
+
+            write_symbolic_csv(
+                symbolic_path,
+                song.notes,
+                song.project.resolution,
+                args.render_bpm,
+            )
+
+            row = metadata_row_for(
+                song.song_id,
+                song.project,
+                song.track,
+                song.scores,
+                song.notes,
+                wav_path,
+                args.render_bpm,
+                provenance=song.provenance,
+                marker_removed=song.marker_removed,
+            )
+            rows.append(row)
+
+            print(
+                f"    {song.project.format} track={song.track.index}:{song.track.name!r} "
+                f"notes={len(song.notes)} mono={row['track_monophony']:.3f} "
+                f"range={row['pitch_min_midi']}-{row['pitch_max_midi']} "
+                f"marker_removed={song.marker_removed} -> {wav_path.name}"
+            )
 
     if args.list:
         if convertable:
@@ -1303,7 +1735,7 @@ def main() -> None:
 
     manifest = {
         "dataset": "Scaleify Vocaloid / singing-synth melody corpus",
-        "generator_version": "2.0",
+        "generator_version": "4.1",
         "scope": (
             "Monophonic vocal melody extracted from symbolic singing-synth project files. "
             "No lyrics, timbre, tuning curves, accompaniment, or singer identity are used by Scaleify."
@@ -1323,13 +1755,14 @@ def main() -> None:
         ),
         "official_presets_requested": args.preset,
         "source_terms_acknowledged": bool(args.accept_source_terms),
-        "official_source_pages": {
-            "otoiro_deco27": OTOIRO_SPECIAL_URL,
-            "otoiro_terms": OTOIRO_TERMS_URL,
-            "crusher_resources": CRUSHER_RESOURCES_URL,
-            "crusher_usage": CRUSHER_USAGE_URL,
-        },
         "downloaded_sources": downloaded_provenance,
+        "marker_filter": {
+            "mode": args.marker_filter,
+            "min_song_fraction": args.marker_song_fraction,
+            "detected": marker_report,
+        },
+        "duplicate_sources_skipped": duplicate_report,
+        "duplicate_sources_skipped_count": len(duplicate_report),
         "generated_count": len(rows),
         "failed_count": len(failures),
         "songs": rows,
@@ -1358,6 +1791,7 @@ def main() -> None:
     print("-------------------")
     print(f"Generated: {len(rows)}")
     print(f"Failed:    {len(failures)}")
+    print(f"Duplicates skipped: {len(duplicate_report)}")
     print(f"Output:    {output}")
     print(f"Train:     python train_style.py {output} --region Vocaloid")
     if convertable:

@@ -108,23 +108,38 @@ run_training() {
     local dataset="$1"
     local dataset_dir="$2"
     local style_prefix="$3"
+    shift 3
+
+    local other_args=("$@")
 
     mkdir -p "$STYLE_DIR"
 
     if (( FORCE_TRAINING )); then
         echo "==> [${dataset}] Re-running style training (--training)"
-        python3 train_style.py "$dataset_dir/" --output "$STYLE_DIR"
+        python3 train_style.py \
+            "$dataset_dir/" \
+            --output "$STYLE_DIR" \
+            "${other_args[@]}"
         cleanup_training_outputs
         return
     fi
 
     if has_styles "$style_prefix"; then
         local count
-        count="$(find "$STYLE_DIR" -maxdepth 1 -type f -name "${style_prefix}_cluster_*.json" | wc -l | tr -d ' ')"
+        count="$(
+            find "$STYLE_DIR" -maxdepth 1 \
+                -type f \
+                -name "${style_prefix}_cluster_*.json" |
+            wc -l |
+            tr -d ' '
+        )"
         echo "==> [${dataset}] Trained styles exist (${count} clusters); skipping training"
     else
         echo "==> [${dataset}] Trained styles not found; training"
-        python3 train_style.py "$dataset_dir/" --output "$STYLE_DIR"
+        python3 train_style.py \
+            "$dataset_dir/" \
+            --output "$STYLE_DIR" \
+            "${other_args[@]}"
         cleanup_training_outputs
     fi
 }
@@ -178,35 +193,41 @@ run_listening_tests() {
 run_dataset() {
     local dataset="$1"
     local generator_cmd dataset_dir style_prefix
+    local other_args=()
 
     case "$dataset" in
         japan)
             generator_cmd="python3 generator/dataset/japan_1892_dataset_generator.py"
             dataset_dir="dataset/japan"
             style_prefix="japan"
+            other_args=()
             ;;
         korea)
             generator_cmd="python3 generator/dataset/korea_traditional_dataset_generator.py"
             dataset_dir="dataset/korea"
             style_prefix="korea"
+            other_args=()
             ;;
         china)
             generator_cmd="python3 generator/dataset/china_traditional_dataset_generator.py"
             dataset_dir="dataset/china"
             style_prefix="china"
+            other_args=()
             ;;
         jsmel|japan-jsmel|japan_jsmel)
             dataset="jsmel"
             generator_cmd="python3 generator/dataset/jsmel_pd_dataset_generator.py"
             dataset_dir="dataset/japan_jsmel"
             style_prefix="japan_jsmel"
+            other_args=()
             ;;
         vocaloid)
             # Keep sources separate from generated training WAVs.
             # The generator writes output to dataset/vocaloid by default.
-            generator_cmd="python3 generator/dataset/vocaloid_dataset_generator.py vocaloid_sources --preset official --accept-source-terms --output dataset/vocaloid"
+            generator_cmd="python3 generator/dataset/vocaloid_dataset_generator.py dataset/vocaloid/sources --preset official --accept-source-terms --output dataset/vocaloid"
             dataset_dir="dataset/vocaloid"
             style_prefix="vocaloid"
+            other_args=("--scale-max-notes" "12")
             ;;
         *)
             die "Unknown dataset: $dataset"
@@ -222,7 +243,7 @@ run_dataset() {
 
     has_wavs "$dataset_dir" || die "[${dataset}] No WAV files found after generation: $dataset_dir"
 
-    run_training "$dataset" "$dataset_dir" "$style_prefix"
+    run_training "$dataset" "$dataset_dir" "$style_prefix" "${other_args[@]}"
     run_listening_tests "$dataset" "$style_prefix"
 
     echo "==> [${dataset}] Done"
