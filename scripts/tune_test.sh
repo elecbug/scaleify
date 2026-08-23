@@ -203,7 +203,7 @@ run_listening_tests() {
             --root G \
             --style-amount 0.9 \
             --rhythm-amount 0.55 \
-            --output "$TUNED_RESULTS_DIR/erika_${style_id}.wav" \
+            --output "$TUNED_RESULTS_DIR/erika_test_${style_id}.wav" \
             --timbre reed
     done
 
@@ -217,7 +217,7 @@ run_listening_tests() {
             --root A \
             --style-amount 0.9 \
             --rhythm-amount 0.55 \
-            --output "$TUNED_RESULTS_DIR/korobeiniki_${style_id}.wav" \
+            --output "$TUNED_RESULTS_DIR/korobeiniki_test_${style_id}.wav" \
             --timbre reed
     done
 
@@ -231,7 +231,7 @@ run_listening_tests() {
             --root C \
             --style-amount 0.9 \
             --rhythm-amount 0.55 \
-            --output "$TUNED_RESULTS_DIR/twinkle_${style_id}.wav" \
+            --output "$TUNED_RESULTS_DIR/twinkle_twinkle_test_${style_id}.wav" \
             --timbre reed
     done
 }
