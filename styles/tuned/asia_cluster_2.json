@@ -328,7 +328,7 @@
   },
   "notes": "Unsupervised corpus-derived v10.1 profile. Ornament/modulation rules were intentionally left empty because they were not estimated robustly.",
   "training": {
-    "generated_utc": "2026-08-24T02:45:55.362132+00:00",
+    "generated_utc": "2026-08-24T02:55:40.266846+00:00",
     "method": "scaleify_unsupervised_cluster_v3",
     "cluster_index": 2,
     "cluster_count": 2,
@@ -401,111 +401,6 @@
           "next_share": 0.00752,
           "gap": 0.00106,
           "score": -0.03894,
-          "eligible": true
-        },
-        {
-          "notes": 8,
-          "scale": [
-            0,
-            2,
-            3,
-            4,
-            5,
-            7,
-            9,
-            10
-          ],
-          "coverage": 0.981699,
-          "cutoff_share": 0.00752,
-          "next_share": 0.006433,
-          "gap": 0.001087,
-          "score": -0.058913,
-          "eligible": true
-        },
-        {
-          "notes": 9,
-          "scale": [
-            0,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            9,
-            10
-          ],
-          "coverage": 0.988131,
-          "cutoff_share": 0.006433,
-          "next_share": 0.006226,
-          "gap": 0.000207,
-          "score": -0.079793,
-          "eligible": true
-        },
-        {
-          "notes": 10,
-          "scale": [
-            0,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            9,
-            10,
-            11
-          ],
-          "coverage": 0.994358,
-          "cutoff_share": 0.006226,
-          "next_share": 0.003395,
-          "gap": 0.002831,
-          "score": -0.097169,
-          "eligible": true
-        },
-        {
-          "notes": 11,
-          "scale": [
-            0,
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            9,
-            10,
-            11
-          ],
-          "coverage": 0.997752,
-          "cutoff_share": 0.003395,
-          "next_share": 0.002248,
-          "gap": 0.001147,
-          "score": -0.118853,
-          "eligible": true
-        },
-        {
-          "notes": 12,
-          "scale": [
-            0,
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            11
-          ],
-          "coverage": 1.0,
-          "cutoff_share": 0.002248,
-          "next_share": 0.0,
-          "gap": 0.002248,
-          "score": -0.137752,
           "eligible": true
         }
       ]
