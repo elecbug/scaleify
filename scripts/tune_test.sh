@@ -302,7 +302,7 @@ run_dataset() {
             generator_cmd="null"
             dataset_dir="$DATASETS_DIR/asia"
             style_prefix="asia"
-            other_args=("--scale-max-notes" "12" "--max-clusters" "8")
+            other_args=()
             ;;
         *)
             die "Unknown dataset: $dataset"
