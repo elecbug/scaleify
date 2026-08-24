@@ -50,6 +50,10 @@ TWINKLE="$RAW_RESULTS_DIR/twinkle_twinkle_test.wav"
 FORCE_DOWNLOAD=0
 FORCE_TRAINING=0
 
+STYLE_AMOUNT=1.0
+RHYTHM_AMOUNT=0.7
+TIMBRE=flute
+
 ensure_venv() {
     if [[ ! -x "$PYTHON" ]]; then
         echo "==> Virtual environment not found; running setup"
@@ -201,10 +205,10 @@ run_listening_tests() {
             --style "$style_id" \
             --style-dir "$STYLE_DIR/" \
             --root G \
-            --style-amount 0.9 \
-            --rhythm-amount 0.55 \
+            --style-amount "$STYLE_AMOUNT" \
+            --rhythm-amount "$RHYTHM_AMOUNT" \
             --output "$TUNED_RESULTS_DIR/erika_test_${style_id}.wav" \
-            --timbre reed
+            --timbre "$TIMBRE"
     done
 
     for style_file in "${style_files[@]}"; do
@@ -215,10 +219,10 @@ run_listening_tests() {
             --style "$style_id" \
             --style-dir "$STYLE_DIR/" \
             --root A \
-            --style-amount 0.9 \
-            --rhythm-amount 0.55 \
+            --style-amount "$STYLE_AMOUNT" \
+            --rhythm-amount "$RHYTHM_AMOUNT" \
             --output "$TUNED_RESULTS_DIR/korobeiniki_test_${style_id}.wav" \
-            --timbre reed
+            --timbre "$TIMBRE"
     done
 
     for style_file in "${style_files[@]}"; do
@@ -229,10 +233,10 @@ run_listening_tests() {
             --style "$style_id" \
             --style-dir "$STYLE_DIR/" \
             --root C \
-            --style-amount 0.9 \
-            --rhythm-amount 0.55 \
+            --style-amount "$STYLE_AMOUNT" \
+            --rhythm-amount "$RHYTHM_AMOUNT" \
             --output "$TUNED_RESULTS_DIR/twinkle_twinkle_test_${style_id}.wav" \
-            --timbre reed
+            --timbre "$TIMBRE"
     done
 }
 
