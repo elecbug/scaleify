@@ -42,7 +42,7 @@ require() {
 
 
 cleanup_workdirs() {
-    rm -rf -- "$BLIND_DIR" "$DEPLOY_DIR"
+    rm -rf -- "$BLIND_DIR" "$DEPLOY_DIR" || true
 }
 
 
@@ -145,7 +145,7 @@ cleanup() {
 
     rm -rf -- \
         "$BLIND_DIR" \
-        "$DEPLOY_DIR"
+        "$DEPLOY_DIR" || true
 }
 
 

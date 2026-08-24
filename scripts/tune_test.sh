@@ -289,14 +289,14 @@ run_dataset() {
             if [[ ! -d "$DATASETS_DIR/asia" ]]; then
                 mkdir -p "$DATASETS_DIR/asia"
             fi
-            if [[ ! -d "$DATASETS_DIR/japan" || ! -d "$DATASETS_DIR/korea" || ! -d "$DATASETS_DIR/china" || ! -d "$DATASETS_DIR/japan_jsmel" ]]; then
-                die "Missing one or more required datasets for 'asia': japan, korea, china, japan_jsmel"
+            if [[ ! -d "$DATASETS_DIR/japan" || ! -d "$DATASETS_DIR/korea" || ! -d "$DATASETS_DIR/china" ]]; then
+                die "Missing one or more required datasets for 'asia': japan, korea, china"
             else
-                echo "==> [asia] Using existing datasets: japan, korea, china, japan_jsmel"
+                echo "==> [asia] Using existing datasets: japan, korea, china"
+                rm -rf "$DATASETS_DIR/asia"/* || true
                 cp -r "$DATASETS_DIR/japan"/* "$DATASETS_DIR/asia/"
                 cp -r "$DATASETS_DIR/korea"/* "$DATASETS_DIR/asia/"
                 cp -r "$DATASETS_DIR/china"/* "$DATASETS_DIR/asia/"
-                cp -r "$DATASETS_DIR/japan_jsmel"/* "$DATASETS_DIR/asia/"
             fi
 
             generator_cmd="null"
