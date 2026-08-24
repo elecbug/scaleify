@@ -285,6 +285,25 @@ run_dataset() {
             style_prefix="arabic"
             other_args=("--scale-max-notes" "12")
             ;;
+        asia)
+            if [[ ! -d "$DATASETS_DIR/asia" ]]; then
+                mkdir -p "$DATASETS_DIR/asia"
+            fi
+            if [[ ! -d "$DATASETS_DIR/japan" || ! -d "$DATASETS_DIR/korea" || ! -d "$DATASETS_DIR/china" || ! -d "$DATASETS_DIR/japan_jsmel" ]]; then
+                die "Missing one or more required datasets for 'asia': japan, korea, china, japan_jsmel"
+            else
+                echo "==> [asia] Using existing datasets: japan, korea, china, japan_jsmel"
+                cp -r "$DATASETS_DIR/japan"/* "$DATASETS_DIR/asia/"
+                cp -r "$DATASETS_DIR/korea"/* "$DATASETS_DIR/asia/"
+                cp -r "$DATASETS_DIR/china"/* "$DATASETS_DIR/asia/"
+                cp -r "$DATASETS_DIR/japan_jsmel"/* "$DATASETS_DIR/asia/"
+            fi
+
+            generator_cmd="null"
+            dataset_dir="$DATASETS_DIR/asia"
+            style_prefix="asia"
+            other_args=("--scale-max-notes" "12" "--max-clusters" "8")
+            ;;
         *)
             die "Unknown dataset: $dataset"
             ;;
@@ -295,7 +314,12 @@ run_dataset() {
     echo "Scaleify tune test: ${dataset}"
     echo "============================================================"
 
-    run_generator "$dataset" "$generator_cmd" "$dataset_dir"
+    if [[ "$generator_cmd" == "null" ]]; then
+        echo "==> [${dataset}] Skipping dataset generation (already exists)"
+    else
+        echo "==> [${dataset}] Dataset generator command: $generator_cmd"
+        run_generator "$dataset" "$generator_cmd" "$dataset_dir"
+    fi
 
     has_wavs "$dataset_dir" || die "[${dataset}] No WAV files found after generation: $dataset_dir"
 
@@ -338,11 +362,11 @@ done
 
 case "$TARGET" in
     all)
-        for dataset in japan korea china jsmel vocaloid arabic; do
+        for dataset in japan korea china jsmel vocaloid arabic asia; do
             run_dataset "$dataset"
         done
         ;;
-    japan|korea|china|jsmel|japan-jsmel|japan_jsmel|vocaloid|arabic)
+    japan|korea|china|jsmel|japan-jsmel|japan_jsmel|vocaloid|arabic|asia)
         run_dataset "$TARGET"
         ;;
     -h|--help)
