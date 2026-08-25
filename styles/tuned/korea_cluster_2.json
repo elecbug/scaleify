@@ -246,15 +246,31 @@
   "tuning": {
     "degree_cents": {}
   },
+  "register": {
+    "enabled": true,
+    "reference": "absolute_midi",
+    "weighting": "note_duration",
+    "median_midi": 63.029,
+    "q1_midi": 56.038,
+    "q3_midi": 68.018,
+    "p10_midi": 48.072,
+    "p90_midi": 70.021,
+    "observed_min_midi": 36.164,
+    "observed_max_midi": 79.013,
+    "iqr_semitones": 11.98,
+    "preferred_range_semitones": 21.949,
+    "event_count": 1685,
+    "weighted_duration": 304.8722
+  },
   "ornaments": [],
   "modulation": {
     "enabled": false,
     "options": []
   },
-  "notes": "Unsupervised corpus-derived v10.1 profile. Ornament/modulation rules were intentionally left empty because they were not estimated robustly.",
+  "notes": "Unsupervised corpus-derived v10.2 profile with duration-weighted absolute register statistics. Ornament/modulation rules were intentionally left empty because they were not estimated robustly.",
   "training": {
-    "generated_utc": "2026-08-22T16:52:56.828011+00:00",
-    "method": "scaleify_unsupervised_cluster_v3",
+    "generated_utc": "2026-08-25T11:54:56.205067+00:00",
+    "method": "scaleify_unsupervised_cluster_v4",
     "cluster_index": 2,
     "cluster_count": 2,
     "files_analyzed": 7,
@@ -335,6 +351,22 @@
       "F": 1,
       "G#": 2
     },
+    "register": {
+      "enabled": true,
+      "reference": "absolute_midi",
+      "weighting": "note_duration",
+      "median_midi": 63.029,
+      "q1_midi": 56.038,
+      "q3_midi": 68.018,
+      "p10_midi": 48.072,
+      "p90_midi": 70.021,
+      "observed_min_midi": 36.164,
+      "observed_max_midi": 79.013,
+      "iqr_semitones": 11.98,
+      "preferred_range_semitones": 21.949,
+      "event_count": 1685,
+      "weighted_duration": 304.8722
+    },
     "source_files": [
       "doraji.wav",
       "gaegori_taryeong_jeju.wav",
@@ -350,7 +382,8 @@
       "same-degree repetitions excluded from melodic transitions",
       "cadence requires count and cross-file support",
       "core scale separated from auxiliary degrees using occupancy elbow",
-      "roots iteratively refined against cluster core scale"
+      "roots iteratively refined against cluster core scale",
+      "absolute register learned with duration-weighted robust quantiles"
     ]
   }
 }

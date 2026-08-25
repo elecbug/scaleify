@@ -2,7 +2,7 @@
   "id": "vocaloid_cluster_2",
   "label": "Vocaloid Cluster 2",
   "region": "Vocaloid",
-  "description": "Unsupervised style cluster 2/2 inferred from 13 monophonic corpus files. Scale and melodic grammar were learned from the cluster rather than supplied by a template.",
+  "description": "Unsupervised style cluster 2/2 inferred from 12 monophonic corpus files. Scale and melodic grammar were learned from the cluster rather than supplied by a template.",
   "scale": [
     0,
     1,
@@ -10,14 +10,14 @@
     3,
     4,
     6,
-    7,
     8,
     11
   ],
   "auxiliary_degrees": {
-    "5": 0.015889,
-    "9": 0.030951,
-    "10": 0.019036
+    "5": 0.015573,
+    "7": 0.038696,
+    "9": 0.029421,
+    "10": 0.016
   },
   "grammar": {
     "pitch_deviation_weight": 0.9,
@@ -34,111 +34,94 @@
     "phrase_leap_semitones": 7.0,
     "min_phrase_events": 3,
     "degree_weights": {
-      "1": 0.5527,
-      "3": 0.1783,
-      "11": 1.3039
+      "1": 0.4198,
+      "11": 1.225
     },
     "interval_weights": {
-      "2": 2.4358,
-      "1": 0.3744,
-      "3": 0.3151
+      "2": 2.5414,
+      "1": 0.243
     },
     "transition_weights": {
-      "2>0": 1.8463,
-      "4>2": 1.6706,
-      "0>7": 1.6695,
-      "6>8": 1.525,
-      "7>4": 1.4488,
-      "0>2": 1.4098,
-      "2>4": 1.3663,
-      "8>6": 1.3387,
-      "4>7": 1.258,
-      "6>7": 1.1622,
-      "1>11": 1.1615,
-      "3>1": 1.0553,
-      "8>11": 1.0205,
-      "11>1": 0.9277,
-      "1>3": 0.8737,
-      "7>0": 0.8125,
-      "11>8": 0.8018,
-      "4>6": 0.6766,
-      "11>6": 0.6654,
-      "0>4": 0.6528,
-      "7>2": 0.4741,
-      "6>11": 0.4597,
-      "3>4": 0.3335,
-      "3>8": 0.1583,
-      "6>3": 0.1575,
-      "3>6": 0.1464,
-      "8>3": 0.0586
+      "2>0": 1.9582,
+      "4>2": 1.7969,
+      "0>2": 1.668,
+      "6>8": 1.5122,
+      "2>4": 1.4851,
+      "8>6": 1.1918,
+      "1>11": 1.1276,
+      "8>11": 1.0375,
+      "3>1": 1.0174,
+      "0>4": 0.9568,
+      "1>3": 0.8769,
+      "11>1": 0.8531,
+      "11>8": 0.7782,
+      "4>6": 0.6713,
+      "11>6": 0.6498,
+      "6>11": 0.5439,
+      "3>4": 0.4242,
+      "6>3": 0.2407,
+      "3>8": 0.1994,
+      "6>4": 0.1281,
+      "4>3": 0.0955,
+      "3>6": 0.0804,
+      "8>3": 0.0707
     },
     "ascending_transition_weights": {
-      "8>11": 2.4171,
-      "6>8": 2.3369,
-      "4>7": 2.2123,
-      "4>6": 2.0049,
-      "0>2": 1.9452,
-      "2>4": 1.815,
-      "7>0": 1.5966,
-      "6>11": 1.5334,
-      "7>11": 1.487,
-      "3>6": 1.4601,
-      "3>4": 1.3875,
-      "6>7": 1.382,
-      "1>3": 1.3778,
-      "11>1": 1.256,
-      "0>7": 1.1547,
-      "3>8": 1.0551,
-      "11>0": 1.0229,
-      "7>2": 0.79,
-      "0>4": 0.3399,
-      "1>2": 0.29
+      "6>8": 2.479,
+      "4>6": 2.4215,
+      "8>11": 2.4196,
+      "0>2": 2.2668,
+      "2>4": 1.7961,
+      "6>11": 1.7858,
+      "1>3": 1.3598,
+      "3>6": 1.3065,
+      "3>4": 1.2999,
+      "11>1": 1.182,
+      "3>8": 1.1162,
+      "11>0": 1.0811,
+      "0>4": 0.519,
+      "1>2": 0.1013
     },
     "descending_transition_weights": {
-      "7>4": 2.7298,
-      "8>6": 2.7273,
-      "11>8": 2.7013,
-      "0>7": 2.2231,
-      "2>0": 2.0926,
-      "11>6": 2.0591,
-      "4>2": 1.8478,
-      "6>3": 1.7264,
-      "6>4": 1.7066,
-      "1>11": 1.3687,
-      "3>1": 1.3575,
-      "4>3": 1.162,
-      "0>6": 1.1187,
-      "8>3": 1.0139,
-      "0>11": 0.8602,
-      "7>3": 0.8371,
-      "7>0": 0.3075,
-      "7>2": 0.2322
+      "8>6": 2.6728,
+      "11>8": 2.6517,
+      "6>4": 2.4118,
+      "2>0": 2.2154,
+      "11>6": 2.0603,
+      "4>2": 1.8395,
+      "6>3": 1.7253,
+      "1>11": 1.3366,
+      "3>1": 1.3328,
+      "0>6": 1.2307,
+      "4>3": 1.1906,
+      "8>3": 1.1543,
+      "0>11": 0.9848
     },
     "trigram_weights": {
-      "4>2>0": 2.6914,
-      "2>4>2": 2.4695,
-      "4>2>4": 2.2853,
-      "0>2>4": 2.2558,
-      "2>0>2": 2.1763,
-      "7>4>2": 2.0524,
-      "0>2>0": 2.0213,
-      "1>3>1": 1.8607,
-      "8>11>8": 1.8543,
-      "2>0>7": 1.8276,
-      "2>0>4": 1.796,
-      "3>1>11": 1.7533,
-      "2>4>7": 1.7516,
-      "0>7>4": 1.7446,
-      "7>4>7": 1.7111,
-      "8>6>8": 1.6166,
-      "3>1>3": 1.6158,
-      "6>8>6": 1.54,
-      "4>7>4": 1.4886,
-      "11>1>3": 1.4834,
-      "3>6>8": 1.4764,
-      "3>8>6": 1.4764,
-      "3>4>3": 1.459,
-      "8>11>1": 1.4525
+      "4>2>0": 2.7068,
+      "2>4>2": 2.4744,
+      "4>2>4": 2.2628,
+      "0>2>4": 2.2537,
+      "2>0>2": 2.2252,
+      "0>2>0": 2.0183,
+      "8>11>8": 1.8968,
+      "1>3>1": 1.8835,
+      "2>0>4": 1.794,
+      "3>1>11": 1.7721,
+      "3>1>3": 1.6329,
+      "3>6>8": 1.5372,
+      "8>11>1": 1.5046,
+      "3>8>6": 1.4818,
+      "11>1>3": 1.4753,
+      "4>6>8": 1.4243,
+      "6>8>3": 1.4218,
+      "3>4>3": 1.3982,
+      "0>4>2": 1.3949,
+      "2>4>6": 1.3933,
+      "1>11>1": 1.3622,
+      "8>3>1": 1.3361,
+      "3>4>6": 1.3283,
+      "8>6>8": 1.3195
     },
     "preferred_phrases": [
       {
@@ -148,7 +131,7 @@
           2,
           0
         ],
-        "weight": 3.0553,
+        "weight": 3.0584,
         "support_count": 40,
         "support_files": 8
       },
@@ -159,7 +142,7 @@
           4,
           2
         ],
-        "weight": 2.8854,
+        "weight": 2.8844,
         "support_count": 30,
         "support_files": 7
       },
@@ -170,8 +153,8 @@
           0,
           2
         ],
-        "weight": 2.7436,
-        "support_count": 24,
+        "weight": 2.7716,
+        "support_count": 25,
         "support_files": 8
       },
       {
@@ -182,9 +165,9 @@
           1,
           3
         ],
-        "weight": 2.7304,
-        "support_count": 28,
-        "support_files": 8
+        "weight": 2.7576,
+        "support_count": 29,
+        "support_files": 9
       },
       {
         "degrees": [
@@ -194,9 +177,9 @@
           1,
           11
         ],
-        "weight": 2.7035,
-        "support_count": 37,
-        "support_files": 10
+        "weight": 2.733,
+        "support_count": 38,
+        "support_files": 9
       },
       {
         "degrees": [
@@ -205,180 +188,169 @@
           2,
           4
         ],
-        "weight": 2.6908,
+        "weight": 2.694,
         "support_count": 22,
         "support_files": 7
       },
       {
         "degrees": [
-          3,
-          1,
-          3,
-          1,
-          11
-        ],
-        "weight": 2.6804,
-        "support_count": 28,
-        "support_files": 6
-      },
-      {
-        "degrees": [
-          11,
-          1,
-          11,
-          1,
-          3
-        ],
-        "weight": 2.6148,
-        "support_count": 32,
-        "support_files": 8
-      },
-      {
-        "degrees": [
           1,
           11,
           1,
           3,
           1
         ],
-        "weight": 2.5843,
-        "support_count": 24,
-        "support_files": 10
-      },
-      {
-        "degrees": [
-          1,
-          3,
-          1,
-          11
-        ],
-        "weight": 2.5585,
-        "support_count": 78,
-        "support_files": 12
-      },
-      {
-        "degrees": [
-          1,
-          11,
-          1,
-          11,
-          1
-        ],
-        "weight": 2.5509,
-        "support_count": 33,
-        "support_files": 7
-      },
-      {
-        "degrees": [
-          3,
-          1,
-          3,
-          1
-        ],
-        "weight": 2.5286,
-        "support_count": 41,
-        "support_files": 7
-      },
-      {
-        "degrees": [
-          4,
-          2,
-          4,
-          2,
-          0
-        ],
-        "weight": 2.5163,
-        "support_count": 17,
-        "support_files": 5
-      },
-      {
-        "degrees": [
-          1,
-          3,
-          1,
-          11,
-          3
-        ],
-        "weight": 2.4951,
-        "support_count": 19,
-        "support_files": 7
-      },
-      {
-        "degrees": [
-          2,
-          0,
-          2,
-          0
-        ],
-        "weight": 2.4659,
-        "support_count": 19,
-        "support_files": 5
-      },
-      {
-        "degrees": [
-          1,
-          11,
-          1,
-          3
-        ],
-        "weight": 2.4462,
-        "support_count": 65,
-        "support_files": 11
-      }
-    ],
-    "cadence_degrees": {
-      "7": 0.4386,
-      "6": 0.4945,
-      "0": 0.3025
-    },
-    "cadence_patterns": [
-      {
-        "degrees": [
-          3,
-          6,
-          8,
-          6
-        ],
-        "weight": 0.8691,
-        "support_count": 4,
-        "support_files": 3
-      },
-      {
-        "degrees": [
-          8,
-          6
-        ],
-        "weight": 0.8157,
-        "support_count": 17,
-        "support_files": 6
-      },
-      {
-        "degrees": [
-          3,
-          8,
-          6
-        ],
-        "weight": 0.8088,
-        "support_count": 6,
-        "support_files": 3
-      },
-      {
-        "degrees": [
-          11,
-          0
-        ],
-        "weight": 0.7919,
-        "support_count": 15,
+        "weight": 2.6489,
+        "support_count": 26,
         "support_files": 9
       },
       {
         "degrees": [
+          1,
+          3,
+          1,
+          11
+        ],
+        "weight": 2.5884,
+        "support_count": 78,
+        "support_files": 11
+      },
+      {
+        "degrees": [
+          3,
+          1,
+          3,
+          1,
+          11
+        ],
+        "weight": 2.5841,
+        "support_count": 27,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          11,
+          1,
+          11,
+          1,
+          3
+        ],
+        "weight": 2.5466,
+        "support_count": 28,
+        "support_files": 7
+      },
+      {
+        "degrees": [
+          4,
+          2,
+          4,
+          2,
+          0
+        ],
+        "weight": 2.5159,
+        "support_count": 17,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          3,
+          1,
+          3,
+          1
+        ],
+        "weight": 2.4826,
+        "support_count": 40,
+        "support_files": 6
+      },
+      {
+        "degrees": [
+          2,
+          0,
+          2,
+          0
+        ],
+        "weight": 2.4734,
+        "support_count": 19,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          4,
+          2,
+          0,
+          2,
+          4
+        ],
+        "weight": 2.4407,
+        "support_count": 15,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          3,
+          1,
+          11,
+          1
+        ],
+        "weight": 2.4371,
+        "support_count": 61,
+        "support_files": 11
+      },
+      {
+        "degrees": [
+          1,
+          11,
+          1,
+          3
+        ],
+        "weight": 2.4371,
+        "support_count": 61,
+        "support_files": 10
+      }
+    ],
+    "cadence_degrees": {
+      "6": 0.5196,
+      "11": 0.0659,
+      "0": 0.2743
+    },
+    "cadence_patterns": [
+      {
+        "degrees": [
           6,
           8,
           6
         ],
-        "weight": 0.6969,
-        "support_count": 4,
+        "weight": 1.2745,
+        "support_count": 5,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          3,
+          6,
+          8,
+          6
+        ],
+        "weight": 1.0298,
+        "support_count": 5,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          8,
+          6
+        ],
+        "weight": 0.9921,
+        "support_count": 18,
+        "support_files": 5
+      },
+      {
+        "degrees": [
+          6,
+          1
+        ],
+        "weight": 0.6688,
+        "support_count": 9,
         "support_files": 3
       },
       {
@@ -387,48 +359,28 @@
           11,
           0
         ],
-        "weight": 0.682,
+        "weight": 0.6626,
         "support_count": 7,
         "support_files": 5
       },
       {
         "degrees": [
+          11,
+          0
+        ],
+        "weight": 0.6576,
+        "support_count": 13,
+        "support_files": 8
+      },
+      {
+        "degrees": [
           0,
           4,
           2,
           0
         ],
-        "weight": 0.5959,
+        "weight": 0.5446,
         "support_count": 4,
-        "support_files": 3
-      },
-      {
-        "degrees": [
-          2,
-          0,
-          4
-        ],
-        "weight": 0.576,
-        "support_count": 9,
-        "support_files": 5
-      },
-      {
-        "degrees": [
-          0,
-          4,
-          2
-        ],
-        "weight": 0.5596,
-        "support_count": 5,
-        "support_files": 3
-      },
-      {
-        "degrees": [
-          6,
-          1
-        ],
-        "weight": 0.5552,
-        "support_count": 8,
         "support_files": 3
       },
       {
@@ -437,20 +389,49 @@
           11,
           3
         ],
-        "weight": 0.5527,
-        "support_count": 21,
-        "support_files": 7
+        "weight": 0.5288,
+        "support_count": 19,
+        "support_files": 6
       },
       {
         "degrees": [
+          1,
+          11,
+          6
+        ],
+        "weight": 0.4993,
+        "support_count": 7,
+        "support_files": 4
+      },
+      {
+        "degrees": [
+          3,
           4,
+          3,
+          1
+        ],
+        "weight": 0.4541,
+        "support_count": 5,
+        "support_files": 3
+      },
+      {
+        "degrees": [
+          1,
+          11
+        ],
+        "weight": 0.4535,
+        "support_count": 93,
+        "support_files": 11
+      },
+      {
+        "degrees": [
           2,
           0,
           4
         ],
-        "weight": 0.5054,
-        "support_count": 5,
-        "support_files": 3
+        "weight": 0.4447,
+        "support_count": 8,
+        "support_files": 4
       }
     ]
   },
@@ -474,20 +455,36 @@
   "tuning": {
     "degree_cents": {}
   },
+  "register": {
+    "enabled": true,
+    "reference": "absolute_midi",
+    "weighting": "note_duration",
+    "median_midi": 66.026,
+    "q1_midi": 64.029,
+    "q3_midi": 70.02,
+    "p10_midi": 62.033,
+    "p90_midi": 72.018,
+    "observed_min_midi": 44.089,
+    "observed_max_midi": 82.012,
+    "iqr_semitones": 5.991,
+    "preferred_range_semitones": 9.985,
+    "event_count": 6097,
+    "weighted_duration": 1632.327982
+  },
   "ornaments": [],
   "modulation": {
     "enabled": false,
     "options": []
   },
-  "notes": "Unsupervised corpus-derived v10.1 profile. Ornament/modulation rules were intentionally left empty because they were not estimated robustly.",
+  "notes": "Unsupervised corpus-derived v10.2 profile with duration-weighted absolute register statistics. Ornament/modulation rules were intentionally left empty because they were not estimated robustly.",
   "training": {
-    "generated_utc": "2026-08-23T02:54:46.726175+00:00",
-    "method": "scaleify_unsupervised_cluster_v3",
+    "generated_utc": "2026-08-25T12:06:21.370888+00:00",
+    "method": "scaleify_unsupervised_cluster_v4",
     "cluster_index": 2,
     "cluster_count": 2,
-    "files_analyzed": 13,
-    "events": 6516,
-    "phrases": 548,
+    "files_analyzed": 12,
+    "events": 6097,
+    "phrases": 509,
     "inferred_scale": [
       0,
       1,
@@ -495,15 +492,15 @@
       3,
       4,
       6,
-      7,
       8,
       11
     ],
-    "inferred_scale_coverage": 0.9341,
+    "inferred_scale_coverage": 0.9003,
     "auxiliary_degrees": {
-      "5": 0.015889,
-      "9": 0.030951,
-      "10": 0.019036
+      "5": 0.015573,
+      "7": 0.038696,
+      "9": 0.029421,
+      "10": 0.016
     },
     "scale_selection": {
       "selection_reason": "coverage_elbow",
@@ -516,15 +513,15 @@
           "scale": [
             0,
             1,
-            2,
             3,
+            4,
             11
           ],
-          "coverage": 0.69757,
-          "cutoff_share": 0.078412,
-          "next_share": 0.077306,
-          "gap": 0.001106,
-          "score": 0.001106,
+          "coverage": 0.702476,
+          "cutoff_share": 0.078565,
+          "next_share": 0.076413,
+          "gap": 0.002152,
+          "score": 0.002152,
           "eligible": false
         },
         {
@@ -532,16 +529,16 @@
           "scale": [
             0,
             1,
-            2,
             3,
+            4,
             6,
             11
           ],
-          "coverage": 0.774876,
-          "cutoff_share": 0.077306,
-          "next_share": 0.075396,
-          "gap": 0.00191,
-          "score": -0.01809,
+          "coverage": 0.778889,
+          "cutoff_share": 0.076413,
+          "next_share": 0.076353,
+          "gap": 6e-05,
+          "score": -0.01994,
           "eligible": false
         },
         {
@@ -555,11 +552,11 @@
             6,
             11
           ],
-          "coverage": 0.850273,
-          "cutoff_share": 0.075396,
-          "next_share": 0.045814,
-          "gap": 0.029582,
-          "score": -0.010418,
+          "coverage": 0.855242,
+          "cutoff_share": 0.076353,
+          "next_share": 0.045069,
+          "gap": 0.031284,
+          "score": -0.008716,
           "eligible": false
         },
         {
@@ -574,12 +571,12 @@
             8,
             11
           ],
-          "coverage": 0.896087,
-          "cutoff_share": 0.045814,
-          "next_share": 0.038038,
-          "gap": 0.007776,
-          "score": -0.052224,
-          "eligible": false
+          "coverage": 0.900311,
+          "cutoff_share": 0.045069,
+          "next_share": 0.038696,
+          "gap": 0.006373,
+          "score": -0.053627,
+          "eligible": true
         },
         {
           "notes": 9,
@@ -594,11 +591,11 @@
             8,
             11
           ],
-          "coverage": 0.934125,
-          "cutoff_share": 0.038038,
-          "next_share": 0.030951,
-          "gap": 0.007087,
-          "score": -0.072913,
+          "coverage": 0.939007,
+          "cutoff_share": 0.038696,
+          "next_share": 0.029421,
+          "gap": 0.009275,
+          "score": -0.070725,
           "eligible": true
         },
         {
@@ -615,11 +612,11 @@
             9,
             11
           ],
-          "coverage": 0.965075,
-          "cutoff_share": 0.030951,
-          "next_share": 0.019036,
-          "gap": 0.011915,
-          "score": -0.088085,
+          "coverage": 0.968427,
+          "cutoff_share": 0.029421,
+          "next_share": 0.016,
+          "gap": 0.013421,
+          "score": -0.086579,
           "eligible": true
         },
         {
@@ -637,11 +634,11 @@
             10,
             11
           ],
-          "coverage": 0.984111,
-          "cutoff_share": 0.019036,
-          "next_share": 0.015889,
-          "gap": 0.003147,
-          "score": -0.116853,
+          "coverage": 0.984427,
+          "cutoff_share": 0.016,
+          "next_share": 0.015573,
+          "gap": 0.000427,
+          "score": -0.119573,
           "eligible": true
         },
         {
@@ -661,22 +658,38 @@
             11
           ],
           "coverage": 1.0,
-          "cutoff_share": 0.015889,
+          "cutoff_share": 0.015573,
           "next_share": 0.0,
-          "gap": 0.015889,
-          "score": -0.124111,
+          "gap": 0.015573,
+          "score": -0.124427,
           "eligible": true
         }
       ]
     },
     "root_distribution": {
-      "A": 3,
+      "A": 2,
       "C": 1,
       "D": 1,
       "D#": 2,
       "F": 4,
       "F#": 1,
       "G#": 1
+    },
+    "register": {
+      "enabled": true,
+      "reference": "absolute_midi",
+      "weighting": "note_duration",
+      "median_midi": 66.026,
+      "q1_midi": 64.029,
+      "q3_midi": 70.02,
+      "p10_midi": 62.033,
+      "p90_midi": 72.018,
+      "observed_min_midi": 44.089,
+      "observed_max_midi": 82.012,
+      "iqr_semitones": 5.991,
+      "preferred_range_semitones": 9.985,
+      "event_count": 6097,
+      "weighted_duration": 1632.327982
     },
     "source_files": [
       "deco27_003_愛言葉v.wav",
@@ -685,7 +698,6 @@
       "deco27_011_ハローセカイ.wav",
       "deco27_018_ブループラネット.wav",
       "deco27_019_宇宙散歩.wav",
-      "deco27_022_デビルじゃないもん.wav",
       "deco27_023_毒林檎.wav",
       "deco27_026_愛言葉iv.wav",
       "deco27_027_キメラ.wav",
@@ -699,7 +711,8 @@
       "same-degree repetitions excluded from melodic transitions",
       "cadence requires count and cross-file support",
       "core scale separated from auxiliary degrees using occupancy elbow",
-      "roots iteratively refined against cluster core scale"
+      "roots iteratively refined against cluster core scale",
+      "absolute register learned with duration-weighted robust quantiles"
     ]
   }
 }
