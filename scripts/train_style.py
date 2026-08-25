@@ -28,7 +28,8 @@ The trainer:
 7. iteratively re-estimates each file's tonic using its cluster scale and re-clusters until stable,
 8. separates a compact core scale from lower-frequency auxiliary degrees,
 9. learns grammar/rhythm/tuning only from notes belonging to the core scale,
-10. writes one directly-loadable Scaleify JSON per cluster.
+10. learns absolute pitch-register statistics independently of the scale,
+11. writes one directly-loadable Scaleify JSON per cluster.
 
 Important design choices
 ------------------------
@@ -40,6 +41,8 @@ Important design choices
 - Cadence patterns require both occurrence count and cross-file support.
 - Root estimation is refined iteratively against the currently inferred cluster scale.
 - Scale inference uses a coverage+elbow rule to prefer a compact core scale; lower-frequency notes are recorded as auxiliary degrees.
+- Register is learned independently from melodic grammar using duration-weighted
+  absolute MIDI pitch statistics over all detected note events.
 - Ornament and modulation rules are NOT hallucinated from the corpus.
   Generated profiles therefore start with ornaments=[] and modulation disabled.
 - Transform-safety parameters such as pitch_deviation_weight and contour_penalty
@@ -164,6 +167,13 @@ class ClusterStats:
     phrase_end_duration_ratios: list[float] = field(default_factory=list)
 
     tuning_cents_by_degree: dict[int, list[float]] = field(default_factory=lambda: defaultdict(list))
+
+    # Absolute pitch-register statistics are intentionally independent from
+    # root-relative grammar and scale membership. This lets a bass corpus and
+    # a lead corpus preserve their distinct registers even when they share the
+    # same melodic vocabulary.
+    register_midi_values: list[float] = field(default_factory=list)
+    register_midi_weights: list[float] = field(default_factory=list)
 
 
 def note_name(pc: int) -> str:
@@ -1009,6 +1019,14 @@ def accumulate_cluster(
             # Rhythm and degree occupancy use every IN-SCALE note, including
             # repeated equal notes.
             for event, duration in zip(phrase.events, durations):
+                # Register is independent from scale membership. Keep every
+                # detected note event so a bass/lead corpus preserves its true
+                # absolute pitch role even when chromatic notes are excluded
+                # from melodic grammar.
+                if np.isfinite(event.source_midi):
+                    stats.register_midi_values.append(float(event.source_midi))
+                    stats.register_midi_weights.append(max(float(duration), 1e-6))
+
                 degree = degree_of_midi(event.source_midi, file.root_pc)
                 if degree not in scale_set:
                     continue
@@ -1173,6 +1191,99 @@ def preferred_duration_ratios(values: list[float], max_bins: int = 6) -> list[fl
     if 1.0 not in chosen:
         chosen.append(1.0)
     return [round(float(x), 4) for x in sorted(set(chosen))]
+
+
+def weighted_quantile(
+    values: Iterable[float],
+    weights: Iterable[float],
+    q: float,
+) -> float:
+    """
+    Duration-weighted quantile.
+
+    q must be in [0, 1]. Note duration is used as the weight so a short F0
+    glitch does not affect the learned register as strongly as a sustained
+    musical note.
+    """
+    x = np.asarray(list(values), dtype=np.float64)
+    w = np.asarray(list(weights), dtype=np.float64)
+
+    if len(x) == 0:
+        return 0.0
+    if len(x) != len(w):
+        raise ValueError("weighted_quantile: values/weights length mismatch")
+    if not 0.0 <= q <= 1.0:
+        raise ValueError("weighted_quantile: q must be in [0, 1]")
+
+    keep = np.isfinite(x) & np.isfinite(w) & (w > 0)
+    x = x[keep]
+    w = w[keep]
+
+    if len(x) == 0:
+        return 0.0
+
+    order = np.argsort(x)
+    x = x[order]
+    w = w[order]
+
+    cumulative = np.cumsum(w)
+    total = float(cumulative[-1])
+    if total <= EPS:
+        return float(np.median(x))
+
+    target = float(q) * total
+    idx = int(np.searchsorted(cumulative, target, side="left"))
+    idx = min(max(idx, 0), len(x) - 1)
+    return float(x[idx])
+
+
+def learn_register_profile(stats: ClusterStats) -> dict:
+    """
+    Learn the cluster's absolute melodic register.
+
+    The robust P10-P90 range is intended as the preferred operating range.
+    Observed min/max are retained only for diagnostics because F0 extraction
+    outliers can make them unstable.
+
+    Register is not transposition-invariant by design: this is the information
+    that distinguishes roles such as bass and lead.
+    """
+    values = np.asarray(stats.register_midi_values, dtype=np.float64)
+    weights = np.asarray(stats.register_midi_weights, dtype=np.float64)
+
+    keep = np.isfinite(values) & np.isfinite(weights) & (weights > 0)
+    values = values[keep]
+    weights = weights[keep]
+
+    if len(values) == 0:
+        return {
+            "enabled": False,
+            "reference": "absolute_midi",
+            "weighting": "note_duration",
+        }
+
+    p10 = weighted_quantile(values, weights, 0.10)
+    q1 = weighted_quantile(values, weights, 0.25)
+    median = weighted_quantile(values, weights, 0.50)
+    q3 = weighted_quantile(values, weights, 0.75)
+    p90 = weighted_quantile(values, weights, 0.90)
+
+    return {
+        "enabled": True,
+        "reference": "absolute_midi",
+        "weighting": "note_duration",
+        "median_midi": round(median, 3),
+        "q1_midi": round(q1, 3),
+        "q3_midi": round(q3, 3),
+        "p10_midi": round(p10, 3),
+        "p90_midi": round(p90, 3),
+        "observed_min_midi": round(float(np.min(values)), 3),
+        "observed_max_midi": round(float(np.max(values)), 3),
+        "iqr_semitones": round(q3 - q1, 3),
+        "preferred_range_semitones": round(p90 - p10, 3),
+        "event_count": int(len(values)),
+        "weighted_duration": round(float(np.sum(weights)), 6),
+    }
 
 
 def learn_profile(
@@ -1402,6 +1513,7 @@ def learn_profile(
         tuning["degree_cents"] = cents_out
 
     roots = Counter(note_name(f.root_pc) for f in stats.files)
+    register = learn_register_profile(stats)
 
     profile = {
         "id": style_id,
@@ -1416,18 +1528,20 @@ def learn_profile(
         "grammar": grammar,
         "rhythm": rhythm,
         "tuning": tuning,
+        "register": register,
         "ornaments": [],
         "modulation": {
             "enabled": False,
             "options": [],
         },
         "notes": (
-            "Unsupervised corpus-derived v10.1 profile. Ornament/modulation rules were "
-            "intentionally left empty because they were not estimated robustly."
+            "Unsupervised corpus-derived v10.2 profile with duration-weighted absolute "
+            "register statistics. Ornament/modulation rules were intentionally left empty "
+            "because they were not estimated robustly."
         ),
         "training": {
             "generated_utc": datetime.now(timezone.utc).isoformat(),
-            "method": "scaleify_unsupervised_cluster_v3",
+            "method": "scaleify_unsupervised_cluster_v4",
             "cluster_index": cluster_index,
             "cluster_count": cluster_count,
             "files_analyzed": len(stats.files),
@@ -1441,6 +1555,7 @@ def learn_profile(
             },
             "scale_selection": scale_selection_meta,
             "root_distribution": dict(sorted(roots.items())),
+            "register": register,
             "source_files": [f.path.name for f in stats.files],
             "fixes": [
                 "out-of-scale degrees excluded from melodic grammar",
@@ -1449,6 +1564,7 @@ def learn_profile(
                 "cadence requires count and cross-file support",
                 "core scale separated from auxiliary degrees using occupancy elbow",
                 "roots iteratively refined against cluster core scale",
+                "absolute register learned with duration-weighted robust quantiles",
             ],
         },
     }
@@ -1766,17 +1882,27 @@ def main() -> None:
             )
         )
 
+        register = profile.get("register", {})
+        register_text = (
+            f"register={register.get('p10_midi', '?')}"
+            f"..{register.get('p90_midi', '?')} "
+            f"(median={register.get('median_midi', '?')})"
+            if register.get("enabled")
+            else "register=n/a"
+        )
+
         print(
             f"Cluster {cluster_idx + 1}: "
             f"files={len(files)}, core={list(scale)}, "
             f"coverage={coverage:.3f}, "
-            f"aux={{{', '.join(f'{d}:{v:.3f}' for d, v in sorted(auxiliary.items()))}}} "
+            f"aux={{{', '.join(f'{d}:{v:.3f}' for d, v in sorted(auxiliary.items()))}}}, "
+            f"{register_text} "
             f"-> {out_path.name}"
         )
 
     report = {
         "generated_utc": datetime.now(timezone.utc).isoformat(),
-        "method": "scaleify_unsupervised_cluster_v3",
+        "method": "scaleify_unsupervised_cluster_v4",
         "corpus": str(args.wav_folder),
         "files_found": len(wavs),
         "files_analyzed": len(analyses),

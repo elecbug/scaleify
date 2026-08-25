@@ -6,8 +6,13 @@ Pipeline
 --------
 MP3/WAV/FLAC/... -> robust decode -> mono melody F0 -> note events -> phrase
 segmentation -> higher-order Viterbi melodic grammar -> rhythm rewrite ->
-degree-conditioned ornaments + optional microtuning -> resynthesis -> reports.
+degree-conditioned ornaments + optional microtuning + optional learned
+register placement -> resynthesis -> output-level normalization -> reports.
 
+Register placement is opt-in. Existing style profiles without a ``register``
+section remain fully compatible and preserve the previous behavior.
+Final output uses active-RMS loudness normalization by default (-16 dBFS)
+with a -1 dBFS soft peak ceiling while preserving event-to-event dynamics.
 v9 is intentionally focused on isolated or predominantly monophonic melody input.
 """
 
@@ -71,6 +76,250 @@ class RenderResult:
     audio: np.ndarray
     events: tuple[RenderEvent, ...]
     output_duration_s: float
+
+
+def load_register_metadata(
+    style_dir: Path,
+    style_id: str,
+) -> dict | None:
+    """
+    Read optional register metadata directly from the selected style JSON.
+
+    This is deliberately independent from ``StyleProfile`` so older
+    style_profiles.py loaders remain compatible. Unknown JSON keys are already
+    ignored by the legacy loader, while this engine consumes ``register`` only
+    when --use-register is explicitly requested.
+    """
+    if not style_dir.exists():
+        return None
+
+    for path in sorted(style_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        if str(data.get("id", "")) != style_id:
+            continue
+
+        register = data.get("register")
+        if not isinstance(register, dict):
+            return None
+
+        return register
+
+    return None
+
+
+def weighted_quantile(
+    values: np.ndarray,
+    weights: np.ndarray,
+    q: float,
+) -> float:
+    values = np.asarray(values, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+
+    keep = (
+        np.isfinite(values)
+        & np.isfinite(weights)
+        & (weights > 0)
+    )
+    values = values[keep]
+    weights = weights[keep]
+
+    if len(values) == 0:
+        return 0.0
+
+    order = np.argsort(values)
+    values = values[order]
+    weights = weights[order]
+
+    cumulative = np.cumsum(weights)
+    total = float(cumulative[-1])
+    if total <= 0:
+        return float(np.median(values))
+
+    target = float(np.clip(q, 0.0, 1.0)) * total
+    idx = int(np.searchsorted(cumulative, target, side="left"))
+    idx = min(max(idx, 0), len(values) - 1)
+    return float(values[idx])
+
+
+def mapping_register_stats(
+    mapping: MappingResult,
+) -> dict[str, float] | None:
+    """
+    Measure the absolute MIDI register of mapped target notes.
+
+    Event duration is used as the weight, matching the trainer's learned
+    register statistics.
+    """
+    values: list[float] = []
+    weights: list[float] = []
+
+    for phrase, targets in zip(mapping.phrases, mapping.targets):
+        for event, target in zip(phrase.events, targets):
+            values.append(float(target))
+            weights.append(max(1.0, float(event.frames)))
+
+    if not values:
+        return None
+
+    x = np.asarray(values, dtype=np.float64)
+    w = np.asarray(weights, dtype=np.float64)
+
+    return {
+        "p10_midi": weighted_quantile(x, w, 0.10),
+        "q1_midi": weighted_quantile(x, w, 0.25),
+        "median_midi": weighted_quantile(x, w, 0.50),
+        "q3_midi": weighted_quantile(x, w, 0.75),
+        "p90_midi": weighted_quantile(x, w, 0.90),
+        "min_midi": float(np.min(x)),
+        "max_midi": float(np.max(x)),
+    }
+
+
+def apply_profile_register(
+    mapping: MappingResult,
+    register: dict | None,
+) -> tuple[MappingResult, dict]:
+    """
+    Move the complete transformed melody by one global octave multiple.
+
+    Only multiples of 12 semitones are considered, so:
+    - pitch classes do not change,
+    - scale degrees do not change,
+    - melodic intervals and contour do not change,
+    - Viterbi grammar decisions remain intact.
+
+    The best shift primarily matches the profile's duration-weighted median
+    register. P10/P90 act as soft range constraints when available.
+    """
+    diagnostic = {
+        "requested": True,
+        "available": False,
+        "applied": False,
+        "shift_semitones": 0,
+    }
+
+    if not isinstance(register, dict):
+        diagnostic["reason"] = "profile_has_no_register"
+        return mapping, diagnostic
+
+    if not bool(register.get("enabled", False)):
+        diagnostic["reason"] = "register_disabled_in_profile"
+        return mapping, diagnostic
+
+    try:
+        target_median = float(register["median_midi"])
+    except (KeyError, TypeError, ValueError):
+        diagnostic["reason"] = "register_missing_median"
+        return mapping, diagnostic
+
+    before = mapping_register_stats(mapping)
+    if before is None:
+        diagnostic["reason"] = "mapping_has_no_notes"
+        return mapping, diagnostic
+
+    diagnostic["available"] = True
+
+    def optional_float(key: str) -> float | None:
+        value = register.get(key)
+        if value is None:
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return None
+        return result if np.isfinite(result) else None
+
+    target_p10 = optional_float("p10_midi")
+    target_p90 = optional_float("p90_midi")
+
+    # One global octave placement is chosen for the entire song. This avoids
+    # phrase-to-phrase octave jumps that would alter the perceived melody.
+    candidates: list[tuple[float, int]] = []
+
+    for shift in range(-60, 61, 12):
+        shifted_min = before["min_midi"] + shift
+        shifted_max = before["max_midi"] + shift
+
+        if shifted_min < 0 or shifted_max > 127:
+            continue
+
+        shifted_median = before["median_midi"] + shift
+        score = abs(shifted_median - target_median)
+
+        # Softly penalize robust-range overflow. Median alignment remains the
+        # dominant criterion because input melodies can naturally have a wider
+        # or narrower tessitura than the training corpus.
+        if target_p10 is not None:
+            shifted_p10 = before["p10_midi"] + shift
+            score += 0.45 * max(0.0, target_p10 - shifted_p10)
+
+        if target_p90 is not None:
+            shifted_p90 = before["p90_midi"] + shift
+            score += 0.45 * max(0.0, shifted_p90 - target_p90)
+
+        # Stable tie-breaker: prefer the smaller physical movement.
+        score += abs(shift) * 1e-6
+        candidates.append((score, shift))
+
+    if not candidates:
+        diagnostic["reason"] = "no_valid_octave_shift"
+        return mapping, diagnostic
+
+    _, shift = min(candidates, key=lambda item: item[0])
+
+    if shift == 0:
+        after = before.copy()
+        diagnostic.update({
+            "applied": False,
+            "reason": "already_nearest_register",
+            "shift_semitones": 0,
+            "before": {k: round(v, 4) for k, v in before.items()},
+            "after": {k: round(v, 4) for k, v in after.items()},
+            "profile": {
+                "median_midi": target_median,
+                "p10_midi": target_p10,
+                "p90_midi": target_p90,
+            },
+        })
+        return mapping, diagnostic
+
+    shifted_targets = tuple(
+        tuple(int(note) + shift for note in phrase_targets)
+        for phrase_targets in mapping.targets
+    )
+
+    shifted = MappingResult(
+        phrases=mapping.phrases,
+        targets=shifted_targets,
+        roots=mapping.roots,
+        scales=mapping.scales,
+        costs=mapping.costs,
+        modulation_names=mapping.modulation_names,
+    )
+
+    after = mapping_register_stats(shifted)
+
+    diagnostic.update({
+        "applied": True,
+        "reason": "octave_shift_applied",
+        "shift_semitones": int(shift),
+        "before": {k: round(v, 4) for k, v in before.items()},
+        "after": (
+            {k: round(v, 4) for k, v in after.items()}
+            if after is not None else None
+        ),
+        "profile": {
+            "median_midi": target_median,
+            "p10_midi": target_p10,
+            "p90_midi": target_p90,
+        },
+    })
+
+    return shifted, diagnostic
 
 
 def ensure_mono(y: np.ndarray) -> np.ndarray:
@@ -504,6 +753,165 @@ def synth_event(
     return (tone * env * amplitude).astype(np.float32)
 
 
+def active_rms(
+    audio: np.ndarray,
+    threshold_db: float = -45.0,
+) -> float:
+    """
+    RMS over perceptually active samples rather than over silence/gaps.
+
+    The threshold is relative to the signal peak. This is intentionally a
+    lightweight loudness proxy; it is more suitable here than whole-file RMS
+    because Scaleify output can contain long phrase gaps and trailing silence.
+    """
+    x = np.asarray(audio, dtype=np.float64)
+
+    if len(x) == 0:
+        return 0.0
+
+    peak = float(np.max(np.abs(x)))
+    if peak <= 1e-12:
+        return 0.0
+
+    threshold = peak * (10.0 ** (threshold_db / 20.0))
+    active = x[np.abs(x) >= threshold]
+
+    if len(active) == 0:
+        active = x[np.abs(x) > 1e-12]
+
+    if len(active) == 0:
+        return 0.0
+
+    return float(np.sqrt(np.mean(np.square(active))))
+
+
+def dbfs_from_linear(value: float) -> float:
+    if value <= 1e-12:
+        return -120.0
+    return float(20.0 * np.log10(value))
+
+
+def master_makeup_and_limit(
+    audio: np.ndarray,
+    makeup_db: float,
+    peak_ceiling_dbfs: float,
+    drive: float,
+) -> np.ndarray:
+    """
+    Perceptual master stage for sparse monophonic synthesis.
+
+    A positive makeup gain intentionally pushes the signal into a smooth tanh
+    limiter. This reduces crest factor and raises sustained-note loudness,
+    unlike peak normalization which can leave a sparse melody subjectively
+    quiet even with a high peak level.
+    """
+    x = np.asarray(audio, dtype=np.float64)
+
+    if len(x) == 0:
+        return x.astype(np.float32)
+
+    gain = 10.0 ** (float(makeup_db) / 20.0)
+    x *= gain
+
+    ceiling = 10.0 ** (float(peak_ceiling_dbfs) / 20.0)
+    peak = float(np.max(np.abs(x)))
+
+    if peak <= 1e-12:
+        return x.astype(np.float32)
+
+    if peak > ceiling:
+        # Normalize relative to the limiter ceiling, then saturate smoothly.
+        normalized = x / ceiling
+        effective_drive = max(1.0, float(drive))
+        x = ceiling * np.tanh(normalized * effective_drive)
+
+    # Final deterministic peak placement. If the limiter did not engage,
+    # leave the signal alone unless it exceeds the ceiling.
+    peak = float(np.max(np.abs(x)))
+    if peak > ceiling and peak > 1e-12:
+        x *= ceiling / peak
+
+    return x.astype(np.float32)
+
+
+def normalize_audio_level(
+    audio: np.ndarray,
+    target_rms_dbfs: float | None,
+    peak_ceiling_dbfs: float,
+    max_gain_db: float = 18.0,
+    active_threshold_db: float = -45.0,
+) -> np.ndarray:
+    """
+    Raise perceived output level using active RMS, then control peaks softly.
+
+    Peak-only normalization is a poor loudness control for sparse monophonic
+    synthesis: a single transient may already be near full scale while the
+    sustained melody remains quiet. Here we instead:
+
+      1. estimate RMS only over active samples,
+      2. raise that RMS toward target_rms_dbfs,
+      3. cap the gain to avoid extreme amplification,
+      4. use tanh soft limiting if the peak exceeds the requested ceiling,
+      5. place the final limited peak at the requested ceiling.
+
+    When target_rms_dbfs is None, legacy behavior is preserved.
+    """
+    x = np.asarray(audio, dtype=np.float64)
+
+    if target_rms_dbfs is None:
+        # Legacy behavior from the original Scaleify renderer.
+        peak = float(np.max(np.abs(x))) if len(x) else 0.0
+        if peak > 0.98:
+            x *= 0.98 / peak
+        return x.astype(np.float32)
+
+    if not np.isfinite(target_rms_dbfs):
+        raise ValueError("target_rms_dbfs must be finite")
+    if not np.isfinite(peak_ceiling_dbfs):
+        raise ValueError("peak_ceiling_dbfs must be finite")
+    if target_rms_dbfs > 0.0:
+        raise ValueError("target_rms_dbfs must be <= 0 dBFS")
+    if peak_ceiling_dbfs > 0.0:
+        raise ValueError("peak_ceiling_dbfs must be <= 0 dBFS")
+    if max_gain_db < 0.0:
+        raise ValueError("max_gain_db must be >= 0")
+
+    current_rms = active_rms(
+        x,
+        threshold_db=active_threshold_db,
+    )
+
+    if current_rms <= 1e-12:
+        return x.astype(np.float32)
+
+    target_rms = 10.0 ** (target_rms_dbfs / 20.0)
+    requested_gain = target_rms / current_rms
+    max_gain = 10.0 ** (max_gain_db / 20.0)
+
+    # Never attenuate merely to hit the RMS target. This feature exists to fix
+    # quiet renders; naturally loud renders are only peak-controlled.
+    gain = min(max(1.0, requested_gain), max_gain)
+    x *= gain
+
+    ceiling = 10.0 ** (peak_ceiling_dbfs / 20.0)
+    peak = float(np.max(np.abs(x))) if len(x) else 0.0
+
+    if peak > ceiling and peak > 1e-12:
+        # Soft saturation reduces crest factor instead of simply scaling the
+        # entire render back down and undoing the RMS gain.
+        drive = peak / max(ceiling, 1e-12)
+        x = ceiling * np.tanh((x / ceiling) * drive)
+
+        # Make the limiter ceiling deterministic.
+        limited_peak = float(np.max(np.abs(x))) if len(x) else 0.0
+        if limited_peak > 1e-12:
+            x *= ceiling / limited_peak
+
+    return np.asarray(x, dtype=np.float32)
+
+
+
+
 def render_mapping(
     y: np.ndarray,
     sr: int,
@@ -516,6 +924,10 @@ def render_mapping(
     enable_ornaments: bool,
     enable_microtuning: bool,
     seed: int,
+    output_rms_dbfs: float | None,
+    output_peak_dbfs: float,
+    master_gain_db: float,
+    limiter_drive: float,
 ) -> RenderResult:
     if not mapping.phrases:
         raise RuntimeError("No note phrases were detected in the input.")
@@ -602,11 +1014,32 @@ def render_mapping(
         parts.append(np.zeros(int(round(trailing_s * sr)), dtype=np.float32))
 
     audio = np.concatenate(parts) if parts else np.zeros(1, dtype=np.float32)
-    peak = float(np.max(np.abs(audio)))
-    if peak > 0.98:
-        audio *= 0.98 / peak
 
-    return RenderResult(audio=audio, events=tuple(render_events), output_duration_s=len(audio) / sr)
+    # Loudness-oriented output normalization. Active RMS raises the sustained
+    # melody level; a soft peak limiter prevents clipping without simply
+    # undoing that gain.
+    audio = normalize_audio_level(
+        audio,
+        target_rms_dbfs=output_rms_dbfs,
+        peak_ceiling_dbfs=output_peak_dbfs,
+    )
+
+    # A sparse synthesized melody can still sound subjectively quiet even
+    # after RMS normalization. Apply deliberate makeup gain into a soft
+    # limiter to reduce crest factor and raise sustained-note loudness.
+    if output_rms_dbfs is not None:
+        audio = master_makeup_and_limit(
+            audio,
+            makeup_db=master_gain_db,
+            peak_ceiling_dbfs=output_peak_dbfs,
+            drive=limiter_drive,
+        )
+
+    return RenderResult(
+        audio=audio,
+        events=tuple(render_events),
+        output_duration_s=len(audio) / sr,
+    )
 
 
 def transition_reward(
@@ -826,11 +1259,64 @@ def main() -> None:
         ),
     )
     parser.add_argument("--timbre", choices=["sine", "flute", "reed", "pluck"], default="flute")
+    parser.add_argument(
+        "--output-rms-db",
+        type=float,
+        default=-16.0,
+        help=(
+            "Target active RMS in dBFS for final loudness adjustment. "
+            "Default: -16.0. Higher values (e.g. -14) sound louder."
+        ),
+    )
+    parser.add_argument(
+        "--output-peak-db",
+        type=float,
+        default=-1.0,
+        help=(
+            "Final soft-limiter peak ceiling in dBFS. "
+            "Default: -1.0."
+        ),
+    )
+    parser.add_argument(
+        "--master-gain-db",
+        type=float,
+        default=6.0,
+        help=(
+            "Makeup gain applied before the final soft limiter. "
+            "This primarily controls perceived loudness. Default: +6 dB."
+        ),
+    )
+    parser.add_argument(
+        "--limiter-drive",
+        type=float,
+        default=1.6,
+        help=(
+            "Final tanh limiter drive. Higher values reduce crest factor more "
+            "aggressively. Default: 1.6."
+        ),
+    )
+    parser.add_argument(
+        "--no-output-normalize",
+        action="store_true",
+        help=(
+            "Disable active-RMS loudness normalization and retain the legacy "
+            "output-level behavior."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=1479)
     parser.add_argument("--no-ornaments", action="store_true")
     parser.add_argument("--no-rhythm", action="store_true")
     parser.add_argument("--no-microtuning", action="store_true")
     parser.add_argument("--no-modulation", action="store_true")
+    parser.add_argument(
+        "--use-register",
+        action="store_true",
+        help=(
+            "Use optional corpus-derived register metadata from the style JSON. "
+            "The whole mapped melody is shifted only by octave multiples. "
+            "Default: disabled for full backward compatibility."
+        ),
+    )
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--report-dir", type=Path, default=Path("reports"))
     args = parser.parse_args()
@@ -850,8 +1336,24 @@ def main() -> None:
         parser.error(f"unknown style '{args.style}'. Use --list-styles.")
     if not 0.0 <= args.style_amount <= 1.0:
         parser.error("--style-amount must be 0..1")
+    if not np.isfinite(args.output_rms_db) or args.output_rms_db > 0.0:
+        parser.error("--output-rms-db must be a finite value <= 0")
+    if not np.isfinite(args.output_peak_db) or args.output_peak_db > 0.0:
+        parser.error("--output-peak-db must be a finite value <= 0")
+    if not np.isfinite(args.master_gain_db):
+        parser.error("--master-gain-db must be finite")
+    if not np.isfinite(args.limiter_drive) or args.limiter_drive < 1.0:
+        parser.error("--limiter-drive must be a finite value >= 1.0")
 
     profile = profiles[args.style]
+
+    register_metadata = None
+    if args.use_register:
+        register_metadata = load_register_metadata(
+            args.style_dir,
+            profile.id,
+        )
+
     rhythm_amount = args.style_amount if args.rhythm_amount is None else args.rhythm_amount
     if args.no_rhythm:
         rhythm_amount = 0.0
@@ -910,6 +1412,44 @@ def main() -> None:
     if any(name != "base" for name in mapping.modulation_names):
         print("Phrase modes:", ", ".join(mapping.modulation_names))
 
+    register_info = {
+        "requested": bool(args.use_register),
+        "available": False,
+        "applied": False,
+        "shift_semitones": 0,
+        "reason": "not_requested",
+    }
+
+    if args.use_register:
+        mapping, register_info = apply_profile_register(
+            mapping,
+            register_metadata,
+        )
+
+        if register_info.get("available"):
+            before = register_info.get("before", {})
+            after = register_info.get("after", {})
+            profile_register = register_info.get("profile", {})
+
+            print(
+                "Register: "
+                f"profile median={profile_register.get('median_midi', '?')}, "
+                f"mapped median={before.get('median_midi', '?')} "
+                f"-> {after.get('median_midi', before.get('median_midi', '?'))}, "
+                f"shift={int(register_info.get('shift_semitones', 0)):+d} semitones"
+            )
+        else:
+            print(
+                "[warn] --use-register requested, but this profile has no usable "
+                "register metadata. Keeping the original register."
+            )
+
+    output_rms_dbfs = (
+        None
+        if args.no_output_normalize
+        else float(args.output_rms_db)
+    )
+
     render = render_mapping(
         y=y,
         sr=sr,
@@ -922,6 +1462,10 @@ def main() -> None:
         enable_ornaments=not args.no_ornaments,
         enable_microtuning=not args.no_microtuning,
         seed=args.seed,
+        output_rms_dbfs=output_rms_dbfs,
+        output_peak_dbfs=float(args.output_peak_db),
+        master_gain_db=float(args.master_gain_db),
+        limiter_drive=float(args.limiter_drive),
     )
 
     output = args.output or args.input.with_name(f"{args.input.stem}_{profile.id}_v9_1.wav")
@@ -946,11 +1490,61 @@ def main() -> None:
         "ornaments_enabled": not args.no_ornaments,
         "microtuning_enabled": not args.no_microtuning,
         "modulation_enabled": not args.no_modulation,
+        "register_requested": bool(args.use_register),
+        "register_available": bool(register_info.get("available", False)),
+        "register_applied": bool(register_info.get("applied", False)),
+        "register_shift_semitones": int(register_info.get("shift_semitones", 0)),
+        "register_info": register_info,
+        "output_normalization_enabled": not args.no_output_normalize,
+        "output_rms_target_dbfs": (
+            float(args.output_rms_db)
+            if not args.no_output_normalize
+            else None
+        ),
+        "output_peak_ceiling_dbfs": (
+            float(args.output_peak_db)
+            if not args.no_output_normalize
+            else None
+        ),
+        "output_active_rms_dbfs": dbfs_from_linear(
+            active_rms(render.audio)
+        ),
+        "output_peak_dbfs": dbfs_from_linear(
+            float(np.max(np.abs(render.audio)))
+            if len(render.audio)
+            else 0.0
+        ),
+        "output_peak_linear": (
+            float(np.max(np.abs(render.audio)))
+            if len(render.audio)
+            else 0.0
+        ),
+        "master_gain_db": (
+            float(args.master_gain_db)
+            if not args.no_output_normalize
+            else None
+        ),
+        "limiter_drive": (
+            float(args.limiter_drive)
+            if not args.no_output_normalize
+            else None
+        ),
         "pitch_method": args.pitch_method,
     })
     metrics_path.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"Saved audio:   {output}")
+    if args.no_output_normalize:
+        print("Output level:  normalization disabled")
+    else:
+        print(
+            f"Output level:  active RMS "
+            f"{dbfs_from_linear(active_rms(render.audio)):.2f} dBFS "
+            f"(target {args.output_rms_db:.2f}), "
+            f"peak {dbfs_from_linear(float(np.max(np.abs(render.audio)))):.2f} dBFS "
+            f"(ceiling {args.output_peak_db:.2f}), "
+            f"makeup {args.master_gain_db:+.1f} dB"
+        )
     print(f"Event report:  {csv_path}")
     print(f"Metrics:       {metrics_path}")
     print(f"Grammar score: {metrics['style_grammar_score']:.3f}")
