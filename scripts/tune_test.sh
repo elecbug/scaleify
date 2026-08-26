@@ -52,7 +52,8 @@ FORCE_TRAINING=0
 
 STYLE_AMOUNT=1.0
 RHYTHM_AMOUNT=0.7
-RENDER_MODE=source
+RENDER_MODE=source #synth
+TIMBRE=flute
 
 ensure_venv() {
     if [[ ! -x "$PYTHON" ]]; then
@@ -209,6 +210,7 @@ run_listening_tests() {
             --rhythm-amount "$RHYTHM_AMOUNT" \
             --output "$TUNED_RESULTS_DIR/erika_test_${style_id}.wav" \
             --render-mode "$RENDER_MODE" \
+            --timbre "$TIMBRE" \
             --use-register
     done
 
@@ -224,6 +226,7 @@ run_listening_tests() {
             --rhythm-amount "$RHYTHM_AMOUNT" \
             --output "$TUNED_RESULTS_DIR/korobeiniki_test_${style_id}.wav" \
             --render-mode "$RENDER_MODE" \
+            --timbre "$TIMBRE" \
             --use-register
     done
 
@@ -239,6 +242,7 @@ run_listening_tests() {
             --rhythm-amount "$RHYTHM_AMOUNT" \
             --output "$TUNED_RESULTS_DIR/twinkle_twinkle_test_${style_id}.wav" \
             --render-mode "$RENDER_MODE" \
+            --timbre "$TIMBRE" \
             --use-register
     done
 }
