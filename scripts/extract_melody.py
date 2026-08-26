@@ -15,10 +15,14 @@ Design
    model-frame resolution.
 8. Use HPSS/harmonic audio for pitch tracking and the corresponding RAW stem
    for pitch-local attack detection.
-9. Fuse neural onset, frame-rise onset, and pitch-local CQT attack evidence.
-10. Decode same-pitch re-attacks with a dip-aware duration dynamic program.
-11. Merge short low-confidence pitch chatter after decoding.
-12. Extract MAIN and BASS roles independently.
+9. Fuse posteriorgrams from ALL candidate sources within each role instead of
+   selecting one winning source per segment.
+10. Decode pitch with enter/stay hysteresis so weak sustained notes survive.
+11. Fuse neural onset, frame-rise onset, and pitch-local CQT attack evidence.
+12. Decode same-pitch re-attacks with a dip-aware duration dynamic program.
+13. Rescue short notes when onset/confidence evidence is strong.
+14. Merge only short low-confidence pitch chatter after decoding.
+15. Extract MAIN and BASS roles independently.
 12. Keep only high-confidence segments for each role.
 10. Resynthesize each accepted segment as a clean monophonic WAV.
 11. Reassemble accepted segments on the original song timeline into a
@@ -218,11 +222,31 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--raw-active-threshold",
+        "--raw-enter-threshold",
+        dest="raw_active_threshold",
         type=float,
-        default=0.12,
+        default=0.08,
         help=(
-            "Minimum raw Basic Pitch note salience considered by Viterbi. "
-            "Default: 0.12."
+            "Pitch-entry salience threshold for hysteresis Viterbi. "
+            "Default: 0.08."
+        ),
+    )
+    p.add_argument(
+        "--raw-stay-threshold",
+        type=float,
+        default=0.04,
+        help=(
+            "Lower salience threshold allowed when sustaining the currently "
+            "tracked pitch. Default: 0.04."
+        ),
+    )
+    p.add_argument(
+        "--fusion-consensus-bonus",
+        type=float,
+        default=0.20,
+        help=(
+            "Bonus from the second-strongest source posterior at the same "
+            "pitch/frame. Default: 0.20."
         ),
     )
     p.add_argument(
@@ -292,6 +316,41 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--short-note-rescue-ms",
+        type=float,
+        default=38.0,
+        help=(
+            "Shortest MAIN note that may survive when confidence and onset "
+            "evidence are both strong. Default: 38 ms."
+        ),
+    )
+    p.add_argument(
+        "--short-note-rescue-confidence",
+        type=float,
+        default=0.56,
+        help=(
+            "Minimum mean pitch confidence for short-note rescue. "
+            "Default: 0.56."
+        ),
+    )
+    p.add_argument(
+        "--short-note-rescue-onset",
+        type=float,
+        default=0.48,
+        help=(
+            "Minimum onset evidence for short-note rescue. Default: 0.48."
+        ),
+    )
+    p.add_argument(
+        "--pass-unique-confidence",
+        type=float,
+        default=0.50,
+        help=(
+            "Minimum confidence for a note detected in only one decoder "
+            "context pass to survive pass fusion. Default: 0.50."
+        ),
+    )
+    p.add_argument(
         "--cleanup-fragment-ms",
         type=float,
         default=95.0,
@@ -347,6 +406,24 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=67,
         help="Highest MIDI pitch for the bass role. Default: 67 (G4).",
+    )
+    p.add_argument(
+        "--bass-short-note-rescue-ms",
+        type=float,
+        default=58.0,
+        help="Shortest rescuable BASS note. Default: 58 ms.",
+    )
+    p.add_argument(
+        "--bass-short-note-rescue-confidence",
+        type=float,
+        default=0.60,
+        help="Minimum BASS confidence for short-note rescue. Default: 0.60.",
+    )
+    p.add_argument(
+        "--bass-short-note-rescue-onset",
+        type=float,
+        default=0.52,
+        help="Minimum BASS onset evidence for short-note rescue. Default: 0.52.",
     )
     p.add_argument(
         "--bass-min-output-note-ms",
@@ -1363,24 +1440,41 @@ def transition_cost(prev_state: int, state: int) -> float:
 def viterbi_monophonic_path(
     grid: np.ndarray,
     active_threshold: float = 0.08,
+    stay_threshold: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Continuity-aware monophonic Viterbi with pitch hysteresis.
+
+    ``active_threshold`` is the entry threshold for a new pitch.
+    ``stay_threshold`` is lower and applies only when the same pitch continues.
+
+    This prevents a real sustained note from disappearing merely because its
+    salience briefly falls below the entry threshold.
+    """
+    enter_threshold = float(active_threshold)
+    stay_threshold = (
+        max(0.0, enter_threshold * 0.5)
+        if stay_threshold is None
+        else float(stay_threshold)
+    )
+
     n_frames = grid.shape[1]
 
+    # Include all pitches that could plausibly be sustained. Entry into a new
+    # pitch is still guarded inside the transition loop.
     candidate_states: list[list[int]] = []
 
     for t in range(n_frames):
         active = np.where(
-            grid[:, t] >= active_threshold
+            grid[:, t] >= stay_threshold
         )[0].tolist()
 
-        # Keep computation bounded in dense polyphonic material:
-        # retain the strongest 12 pitch candidates at each frame.
-        if len(active) > 12:
+        if len(active) > 16:
             active = sorted(
                 active,
                 key=lambda p: float(grid[p, t]),
                 reverse=True,
-            )[:12]
+            )[:16]
 
         active.append(REST_STATE)
         candidate_states.append(active)
@@ -1391,34 +1485,57 @@ def viterbi_monophonic_path(
     for state in candidate_states[0]:
         if state == REST_STATE:
             peak = float(np.max(grid[:, 0]))
-            emission = 0.30 if peak < active_threshold else 0.02
+            if peak < stay_threshold:
+                emission = 0.28
+            elif peak < enter_threshold:
+                emission = 0.07
+            else:
+                emission = 0.01
         else:
-            emission = 2.2 * float(grid[state, 0])
+            salience = float(grid[state, 0])
+            if salience < enter_threshold:
+                continue
+            emission = 2.25 * salience
 
         prev_scores[state] = emission
+
+    if REST_STATE not in prev_scores:
+        prev_scores[REST_STATE] = 0.0
 
     back.append({state: -1 for state in prev_scores})
 
     for t in range(1, n_frames):
         current_scores: dict[int, float] = {}
         current_back: dict[int, int] = {}
-
         peak = float(np.max(grid[:, t]))
 
         for state in candidate_states[t]:
-            if state == REST_STATE:
-                emission = (
-                    0.32
-                    if peak < active_threshold
-                    else 0.015
-                )
-            else:
-                emission = 2.2 * float(grid[state, t])
-
             best_prev = None
             best_score = -float("inf")
 
             for prev_state, prev_score in prev_scores.items():
+                if state == REST_STATE:
+                    if peak < stay_threshold:
+                        emission = 0.28
+                    elif peak < enter_threshold:
+                        emission = 0.055
+                    else:
+                        emission = 0.008
+                else:
+                    salience = float(grid[state, t])
+
+                    if prev_state == state:
+                        # Lower threshold while sustaining an already-tracked
+                        # pitch. Weak but coherent frames remain available.
+                        if salience < stay_threshold:
+                            continue
+                        emission = 2.15 * salience + 0.025
+                    else:
+                        # New pitch entry or pitch change remains conservative.
+                        if salience < enter_threshold:
+                            continue
+                        emission = 2.25 * salience
+
                 score = (
                     prev_score
                     + emission
@@ -1429,20 +1546,24 @@ def viterbi_monophonic_path(
                     best_score = score
                     best_prev = prev_state
 
-            current_scores[state] = best_score
-            current_back[state] = int(best_prev)
+            if best_prev is not None:
+                current_scores[state] = best_score
+                current_back[state] = int(best_prev)
+
+        if not current_scores:
+            current_scores = {REST_STATE: 0.0}
+            current_back = {REST_STATE: REST_STATE}
 
         prev_scores = current_scores
         back.append(current_back)
 
     state = max(prev_scores, key=prev_scores.get)
-
     path = np.full(n_frames, REST_STATE, dtype=np.int16)
 
     for t in range(n_frames - 1, -1, -1):
         path[t] = state
         if t > 0:
-            state = back[t][state]
+            state = back[t].get(state, REST_STATE)
 
     confidence = np.zeros(n_frames, dtype=np.float32)
 
@@ -1500,7 +1621,19 @@ def path_to_notes(
     fps: float,
     min_note_ms: float,
     retrigger_boundaries: np.ndarray | None = None,
+    onset_score: np.ndarray | None = None,
+    rescue_min_ms: float = 0.0,
+    rescue_confidence: float = 1.1,
+    rescue_onset: float = 1.1,
 ) -> list[Note]:
+    """
+    Convert a monophonic path to note events.
+
+    Notes shorter than ``min_note_ms`` are normally rejected, but can be
+    rescued when they are longer than ``rescue_min_ms`` and have both strong
+    pitch confidence and strong onset evidence. This restores fast real notes
+    without lowering the global minimum-duration filter for noisy fragments.
+    """
     notes: list[Note] = []
     n = len(path)
     i = 0
@@ -1525,16 +1658,31 @@ def path_to_notes(
         end = j / fps
         duration_ms = (end - start) * 1000.0
 
-        if duration_ms >= min_note_ms:
-            conf_values = confidence[i:j]
-            conf_values = conf_values[conf_values > 0]
+        conf_values = confidence[i:j]
+        conf_values = conf_values[conf_values > 0]
 
-            conf = (
-                float(np.mean(conf_values))
-                if len(conf_values)
-                else 0.0
-            )
+        conf = (
+            float(np.mean(conf_values))
+            if len(conf_values)
+            else 0.0
+        )
 
+        onset_strength = 0.0
+        if onset_score is not None and 0 <= state < onset_score.shape[0]:
+            lookahead = max(1, int(round(0.045 * fps)))
+            onset_end = min(onset_score.shape[1], i + lookahead)
+            onset_strength = float(
+                np.max(onset_score[state, i:onset_end])
+            ) if onset_end > i else 0.0
+
+        normal_keep = duration_ms >= min_note_ms
+        rescued = (
+            duration_ms >= rescue_min_ms
+            and conf >= rescue_confidence
+            and onset_strength >= rescue_onset
+        )
+
+        if normal_keep or rescued:
             notes.append(
                 Note(
                     start=start,
@@ -1755,6 +1903,581 @@ def quality_metrics(
         float(octave_jump_ratio),
         note_count,
         float(score),
+    )
+
+
+
+def resample_posterior_time(
+    grid: np.ndarray,
+    target_frames: int,
+) -> np.ndarray:
+    """Linearly align a 128 x T posteriorgram onto a common normalized time axis."""
+    grid = np.asarray(grid, dtype=np.float32)
+
+    if grid.shape[1] == target_frames:
+        return grid.copy()
+
+    if grid.shape[1] <= 1 or target_frames <= 1:
+        return np.repeat(
+            grid[:, :1],
+            max(1, target_frames),
+            axis=1,
+        ).astype(np.float32)
+
+    src_x = np.linspace(0.0, 1.0, grid.shape[1], dtype=np.float64)
+    dst_x = np.linspace(0.0, 1.0, target_frames, dtype=np.float64)
+
+    out = np.empty((grid.shape[0], target_frames), dtype=np.float32)
+    for pitch in range(grid.shape[0]):
+        out[pitch] = np.interp(
+            dst_x,
+            src_x,
+            grid[pitch],
+        ).astype(np.float32)
+
+    return out
+
+
+def fuse_role_posteriors(
+    items: list[tuple[str, np.ndarray, np.ndarray]],
+    consensus_bonus: float,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """
+    Fuse all role sources without requiring one source to win the segment.
+
+    Primary evidence is the strongest reliability-weighted posterior. The
+    second strongest source adds a small consensus bonus. Thus:
+    - a note visible only in one good source survives,
+    - a note visible in several sources becomes more trustworthy,
+    - averaging cannot wash out sparse real notes.
+    """
+    if not items:
+        return None
+
+    target_frames = max(grid.shape[1] for _, grid, _ in items)
+
+    salience_stack = []
+    onset_stack = []
+
+    for name, grid, onset in items:
+        weight = source_fusion_weight(name)
+        salience_stack.append(
+            np.clip(
+                resample_posterior_time(grid, target_frames) * weight,
+                0.0,
+                1.0,
+            )
+        )
+        onset_stack.append(
+            np.clip(
+                resample_posterior_time(onset, target_frames) * weight,
+                0.0,
+                1.0,
+            )
+        )
+
+    sal = np.stack(salience_stack, axis=0)
+    ons = np.stack(onset_stack, axis=0)
+
+    sal_sorted = np.sort(sal, axis=0)
+    ons_sorted = np.sort(ons, axis=0)
+
+    top_sal = sal_sorted[-1]
+    second_sal = sal_sorted[-2] if len(items) > 1 else 0.0
+    top_ons = ons_sorted[-1]
+    second_ons = ons_sorted[-2] if len(items) > 1 else 0.0
+
+    bonus = float(np.clip(consensus_bonus, 0.0, 0.50))
+
+    fused_salience = np.clip(
+        top_sal + bonus * second_sal,
+        0.0,
+        1.0,
+    ).astype(np.float32)
+
+    fused_onset = np.clip(
+        top_ons + 0.5 * bonus * second_ons,
+        0.0,
+        1.0,
+    ).astype(np.float32)
+
+    return fused_salience, fused_onset
+
+
+def fuse_context_pass_notes(
+    passes: list[list[Note]],
+    unique_confidence: float,
+    match_tolerance_s: float = 0.080,
+) -> list[Note]:
+    """
+    Fuse note events from two context passes.
+
+    Matching pitch/time notes receive a confidence boost and averaged
+    boundaries. A note seen in only one pass is still retained when it is
+    sufficiently confident, avoiding the old winner-takes-all pass selection.
+    """
+    if not passes:
+        return []
+    if len(passes) == 1:
+        return list(passes[0])
+
+    base = [Note(n.start, n.end, n.pitch, n.confidence) for n in passes[0]]
+    used = [False] * len(passes[1])
+
+    fused: list[Note] = []
+
+    for a in base:
+        best_j = None
+        best_score = -1.0
+        center_a = 0.5 * (a.start + a.end)
+
+        for j, b in enumerate(passes[1]):
+            if used[j] or b.pitch != a.pitch:
+                continue
+
+            center_b = 0.5 * (b.start + b.end)
+            overlap = max(
+                0.0,
+                min(a.end, b.end) - max(a.start, b.start),
+            )
+            min_dur = max(
+                1e-6,
+                min(a.end - a.start, b.end - b.start),
+            )
+            overlap_ratio = overlap / min_dur
+            center_close = abs(center_a - center_b) <= match_tolerance_s
+
+            score = overlap_ratio + (0.5 if center_close else 0.0)
+            if score > best_score and (overlap_ratio >= 0.25 or center_close):
+                best_score = score
+                best_j = j
+
+        if best_j is None:
+            if a.confidence >= unique_confidence:
+                fused.append(a)
+            continue
+
+        b = passes[1][best_j]
+        used[best_j] = True
+
+        wa = max(1e-6, a.confidence)
+        wb = max(1e-6, b.confidence)
+        total = wa + wb
+
+        fused.append(
+            Note(
+                start=(a.start * wa + b.start * wb) / total,
+                end=(a.end * wa + b.end * wb) / total,
+                pitch=a.pitch,
+                confidence=float(
+                    np.clip(
+                        1.0 - (1.0 - a.confidence) * (1.0 - b.confidence),
+                        0.0,
+                        1.0,
+                    )
+                ),
+            )
+        )
+
+    for j, b in enumerate(passes[1]):
+        if not used[j] and b.confidence >= unique_confidence:
+            fused.append(b)
+
+    fused.sort(key=lambda n: (n.start, n.end, n.pitch))
+
+    # Resolve accidental cross-pass overlap monophonically.
+    resolved: list[Note] = []
+    for note in fused:
+        if not resolved or note.start >= resolved[-1].end:
+            resolved.append(note)
+            continue
+
+        prev = resolved[-1]
+
+        if note.pitch == prev.pitch:
+            resolved[-1] = Note(
+                start=min(prev.start, note.start),
+                end=max(prev.end, note.end),
+                pitch=prev.pitch,
+                confidence=max(prev.confidence, note.confidence),
+            )
+        elif note.confidence > prev.confidence:
+            if note.start > prev.start:
+                resolved[-1] = Note(
+                    start=prev.start,
+                    end=max(prev.start, note.start),
+                    pitch=prev.pitch,
+                    confidence=prev.confidence,
+                )
+                if resolved[-1].end <= resolved[-1].start:
+                    resolved.pop()
+            resolved.append(note)
+        else:
+            # Keep the stronger previous pitch and trim the weaker newcomer.
+            if note.end > prev.end:
+                trimmed = Note(
+                    start=prev.end,
+                    end=note.end,
+                    pitch=note.pitch,
+                    confidence=note.confidence,
+                )
+                if trimmed.end > trimmed.start:
+                    resolved.append(trimmed)
+
+    return resolved
+
+
+def _role_fused_pass(
+    sources: list[AnalysisSource],
+    sr: int,
+    analysis_start: float,
+    analysis_end: float,
+    center_start: float,
+    center_end: float,
+    transcriber: BasicPitchTranscriber,
+    fallback_fps: float,
+    bridge_gap_ms: float,
+    min_output_note_ms: float,
+    retrigger_min_ms: float,
+    retrigger_pitch_tolerance: int,
+    raw_enter_threshold: float,
+    raw_stay_threshold: float,
+    raw_retrigger_threshold: float,
+    attack_onset_weight: float,
+    tempo_bpm: float,
+    tempo_retrigger_fraction: float,
+    retrigger_split_penalty: float,
+    retrigger_dip_window_ms: float,
+    retrigger_min_dip: float,
+    retrigger_strong_margin: float,
+    cleanup_fragment_ms: float,
+    cleanup_confidence: float,
+    cleanup_max_semitones: int,
+    rescue_min_ms: float,
+    rescue_confidence: float,
+    rescue_onset: float,
+    fusion_consensus_bonus: float,
+    tmp_dir: Path,
+    pass_index: int,
+    segment_index: int,
+) -> tuple[list[Note], str]:
+    raw_items: list[tuple[str, np.ndarray, np.ndarray]] = []
+    fallback_notes: list[Note] = []
+    source_names: list[str] = []
+
+    decode_min_midi = min(s.min_midi for s in sources)
+    decode_max_midi = max(s.max_midi for s in sources)
+
+    for source in sources:
+        pitch_context = crop_audio(
+            source.pitch_audio,
+            sr,
+            analysis_start,
+            analysis_end,
+        )
+        attack_context = crop_audio(
+            source.attack_audio,
+            sr,
+            analysis_start,
+            analysis_end,
+        )
+
+        if len(pitch_context) < int(0.25 * sr):
+            continue
+
+        source_names.append(source.name)
+
+        context_wav = (
+            tmp_dir
+            / f"fusion_{segment_index:04d}_{source.name}_p{pass_index}.wav"
+        )
+        sf.write(
+            context_wav,
+            pitch_context,
+            sr,
+            subtype="PCM_16",
+        )
+
+        prediction = transcriber.predict(context_wav)
+        duration_s = len(pitch_context) / sr
+
+        raw_inputs = raw_basic_pitch_decoder_inputs(
+            prediction=prediction,
+            pitch_context_audio=pitch_context,
+            attack_context_audio=attack_context,
+            sr=sr,
+            min_midi=source.min_midi,
+            max_midi=source.max_midi,
+            attack_weight=attack_onset_weight,
+        )
+
+        if raw_inputs is not None:
+            grid, onset, _ = raw_inputs
+            raw_items.append((source.name, grid, onset))
+            continue
+
+        # Per-source fallback note events. These are only used if every source
+        # lacks usable raw posteriorgrams.
+        events = [
+            e
+            for e in prediction.note_events
+            if len(e) >= 3
+            and source.min_midi <= int(round(float(e[2]))) <= source.max_midi
+        ]
+        grid = note_events_to_confidence_grid(
+            events,
+            duration_s=duration_s,
+            fps=fallback_fps,
+        )
+        onset_grid = note_events_to_onset_grid(
+            events,
+            duration_s=duration_s,
+            fps=fallback_fps,
+        )
+        path, frame_conf = viterbi_monophonic_path(
+            grid,
+            active_threshold=raw_enter_threshold,
+            stay_threshold=raw_stay_threshold,
+        )
+        boundaries = retrigger_boundaries_from_onsets(
+            path=path,
+            onset_grid=onset_grid,
+            fps=fallback_fps,
+            min_spacing_ms=retrigger_min_ms,
+            pitch_tolerance=retrigger_pitch_tolerance,
+        )
+        fallback_notes.extend(
+            path_to_notes(
+                path,
+                frame_conf,
+                fps=fallback_fps,
+                min_note_ms=min_output_note_ms,
+                retrigger_boundaries=boundaries,
+                onset_score=onset_grid,
+                rescue_min_ms=rescue_min_ms,
+                rescue_confidence=rescue_confidence,
+                rescue_onset=rescue_onset,
+            )
+        )
+
+    fused = fuse_role_posteriors(
+        raw_items,
+        consensus_bonus=fusion_consensus_bonus,
+    )
+
+    if fused is None:
+        notes = fallback_notes
+        center_offset = center_start - analysis_start
+        center_duration = center_end - center_start
+        notes = crop_notes_to_center(
+            notes,
+            center_offset_s=center_offset,
+            center_duration_s=center_duration,
+        )
+        return notes, "fallback_events"
+
+    grid, fused_onset = fused
+    context_duration = analysis_end - analysis_start
+    decoder_fps = grid.shape[1] / max(context_duration, 1e-9)
+
+    path, frame_conf = viterbi_monophonic_path(
+        grid,
+        active_threshold=raw_enter_threshold,
+        stay_threshold=raw_stay_threshold,
+    )
+
+    bridge_frames = max(
+        0,
+        int(round(bridge_gap_ms / 1000.0 * decoder_fps)),
+    )
+    path = bridge_short_gaps(
+        path,
+        max_gap_frames=bridge_frames,
+    )
+
+    boundaries = duration_aware_retrigger_boundaries(
+        path=path,
+        onset_score=fused_onset,
+        pitch_salience=grid,
+        fps=decoder_fps,
+        threshold=raw_retrigger_threshold,
+        absolute_min_ms=retrigger_min_ms,
+        min_note_ms=min_output_note_ms,
+        pitch_tolerance=retrigger_pitch_tolerance,
+        tempo_bpm=tempo_bpm,
+        tempo_fraction=tempo_retrigger_fraction,
+        split_penalty=retrigger_split_penalty,
+        dip_window_ms=retrigger_dip_window_ms,
+        min_dip=retrigger_min_dip,
+        strong_margin=retrigger_strong_margin,
+    )
+
+    for t, state in enumerate(path):
+        if state == REST_STATE:
+            frame_conf[t] = 0.0
+        elif frame_conf[t] <= 0:
+            frame_conf[t] = grid[state, t]
+
+    notes = path_to_notes(
+        path,
+        frame_conf,
+        fps=decoder_fps,
+        min_note_ms=min_output_note_ms,
+        retrigger_boundaries=boundaries,
+        onset_score=fused_onset,
+        rescue_min_ms=rescue_min_ms,
+        rescue_confidence=rescue_confidence,
+        rescue_onset=rescue_onset,
+    )
+
+    notes = cleanup_micro_fragments(
+        notes,
+        max_fragment_ms=cleanup_fragment_ms,
+        confidence_ceiling=cleanup_confidence,
+        max_semitones=cleanup_max_semitones,
+    )
+
+    center_offset = center_start - analysis_start
+    center_duration = center_end - center_start
+    notes = crop_notes_to_center(
+        notes,
+        center_offset_s=center_offset,
+        center_duration_s=center_duration,
+    )
+
+    return notes, "fusion[" + "+".join(sorted(set(source_names))) + "]"
+
+
+def analyze_role_fused(
+    sources: list[AnalysisSource],
+    sr: int,
+    window: dict,
+    transcriber: BasicPitchTranscriber,
+    fps: float,
+    bridge_gap_ms: float,
+    min_output_note_ms: float,
+    retrigger_min_ms: float,
+    retrigger_pitch_tolerance: int,
+    raw_enter_threshold: float,
+    raw_stay_threshold: float,
+    raw_retrigger_threshold: float,
+    attack_onset_weight: float,
+    tempo_bpm: float,
+    tempo_retrigger_fraction: float,
+    retrigger_split_penalty: float,
+    retrigger_dip_window_ms: float,
+    retrigger_min_dip: float,
+    retrigger_strong_margin: float,
+    cleanup_fragment_ms: float,
+    cleanup_confidence: float,
+    cleanup_max_semitones: int,
+    rescue_min_ms: float,
+    rescue_confidence: float,
+    rescue_onset: float,
+    fusion_consensus_bonus: float,
+    pass_unique_confidence: float,
+    decoder_passes: int,
+    decoder_extra_context_ms: float,
+    tmp_dir: Path,
+) -> CandidateResult:
+    total_duration = max(len(s.pitch_audio) for s in sources) / sr
+
+    pass_ranges = [
+        (
+            window["context_start"],
+            window["context_end"],
+        )
+    ]
+
+    if decoder_passes >= 2:
+        extra = max(0.0, decoder_extra_context_ms / 1000.0)
+        pass_ranges.append(
+            (
+                max(0.0, window["context_start"] - extra),
+                min(total_duration, window["context_end"] + extra),
+            )
+        )
+
+    decoded_passes: list[list[Note]] = []
+    labels: list[str] = []
+
+    for pass_index, (analysis_start, analysis_end) in enumerate(
+        pass_ranges,
+        start=1,
+    ):
+        notes, label = _role_fused_pass(
+            sources=sources,
+            sr=sr,
+            analysis_start=analysis_start,
+            analysis_end=analysis_end,
+            center_start=window["center_start"],
+            center_end=window["center_end"],
+            transcriber=transcriber,
+            fallback_fps=fps,
+            bridge_gap_ms=bridge_gap_ms,
+            min_output_note_ms=min_output_note_ms,
+            retrigger_min_ms=retrigger_min_ms,
+            retrigger_pitch_tolerance=retrigger_pitch_tolerance,
+            raw_enter_threshold=raw_enter_threshold,
+            raw_stay_threshold=raw_stay_threshold,
+            raw_retrigger_threshold=raw_retrigger_threshold,
+            attack_onset_weight=attack_onset_weight,
+            tempo_bpm=tempo_bpm,
+            tempo_retrigger_fraction=tempo_retrigger_fraction,
+            retrigger_split_penalty=retrigger_split_penalty,
+            retrigger_dip_window_ms=retrigger_dip_window_ms,
+            retrigger_min_dip=retrigger_min_dip,
+            retrigger_strong_margin=retrigger_strong_margin,
+            cleanup_fragment_ms=cleanup_fragment_ms,
+            cleanup_confidence=cleanup_confidence,
+            cleanup_max_semitones=cleanup_max_semitones,
+            rescue_min_ms=rescue_min_ms,
+            rescue_confidence=rescue_confidence,
+            rescue_onset=rescue_onset,
+            fusion_consensus_bonus=fusion_consensus_bonus,
+            tmp_dir=tmp_dir,
+            pass_index=pass_index,
+            segment_index=window["segment_index"],
+        )
+        decoded_passes.append(notes)
+        labels.append(label)
+
+    notes = fuse_context_pass_notes(
+        decoded_passes,
+        unique_confidence=pass_unique_confidence,
+    )
+
+    center_duration = (
+        window["center_end"] - window["center_start"]
+    )
+
+    (
+        voiced_ratio,
+        mean_confidence,
+        large_jump_ratio,
+        octave_jump_ratio,
+        note_count,
+        score,
+    ) = quality_metrics(
+        notes,
+        duration_s=center_duration,
+    )
+
+    source_name = labels[0] if labels else "fusion"
+    if len(labels) > 1:
+        source_name = "pass-fused:" + labels[0]
+
+    return CandidateResult(
+        source_name=source_name,
+        notes=notes,
+        score=score,
+        raw_score=score,
+        source_bias=0.0,
+        voiced_ratio=voiced_ratio,
+        mean_confidence=mean_confidence,
+        large_jump_ratio=large_jump_ratio,
+        octave_jump_ratio=octave_jump_ratio,
+        note_count=note_count,
     )
 
 
@@ -2237,6 +2960,30 @@ def source_bias(source_name: str) -> float:
     return float(biases.get(source_name, 0.0))
 
 
+
+def source_fusion_weight(source_name: str) -> float:
+    """
+    Reliability prior used during role-level posterior fusion.
+
+    A unique note is never discarded merely because it appears in a lower
+    ranked source; these weights only calibrate confidence before max fusion.
+    """
+    weights = {
+        "other_harmonic": 1.00,
+        "vocals": 0.94,
+        "guitar": 0.92,
+        "piano": 0.92,
+        "other": 0.84,
+        "instrumental_harmonic": 0.84,
+        "instrumental": 0.76,
+        "mix_harmonic": 0.72,
+        "mix": 0.58,
+        "bass_harmonic": 1.00,
+        "bass": 0.86,
+    }
+    return float(weights.get(source_name, 0.80))
+
+
 def write_events_json(
     path: Path,
     source_file: str,
@@ -2675,74 +3422,84 @@ def process_song(
                 if not candidates:
                     continue
 
-                results: list[CandidateResult] = []
+                try:
+                    best = analyze_role_fused(
+                        sources=candidates,
+                        sr=ANALYSIS_SR,
+                        window=window,
+                        transcriber=transcriber,
+                        fps=args.viterbi_fps,
+                        bridge_gap_ms=args.bridge_gap_ms,
+                        min_output_note_ms=(
+                            args.bass_min_output_note_ms
+                            if role == "bass"
+                            else args.min_output_note_ms
+                        ),
+                        retrigger_min_ms=(
+                            args.bass_retrigger_min_ms
+                            if role == "bass"
+                            else args.retrigger_min_ms
+                        ),
+                        retrigger_pitch_tolerance=args.retrigger_pitch_tolerance,
+                        raw_enter_threshold=args.raw_active_threshold,
+                        raw_stay_threshold=args.raw_stay_threshold,
+                        raw_retrigger_threshold=(
+                            args.bass_raw_retrigger_threshold
+                            if role == "bass"
+                            else args.raw_retrigger_threshold
+                        ),
+                        attack_onset_weight=(
+                            args.bass_attack_onset_weight
+                            if role == "bass"
+                            else args.attack_onset_weight
+                        ),
+                        tempo_bpm=tempo,
+                        tempo_retrigger_fraction=args.tempo_retrigger_fraction,
+                        retrigger_split_penalty=(
+                            args.bass_retrigger_split_penalty
+                            if role == "bass"
+                            else args.retrigger_split_penalty
+                        ),
+                        retrigger_dip_window_ms=args.retrigger_dip_window_ms,
+                        retrigger_min_dip=args.retrigger_min_dip,
+                        retrigger_strong_margin=args.retrigger_strong_margin,
+                        cleanup_fragment_ms=(
+                            max(args.cleanup_fragment_ms, 120.0)
+                            if role == "bass"
+                            else args.cleanup_fragment_ms
+                        ),
+                        cleanup_confidence=args.cleanup_confidence,
+                        cleanup_max_semitones=args.cleanup_max_semitones,
+                        rescue_min_ms=(
+                            args.bass_short_note_rescue_ms
+                            if role == "bass"
+                            else args.short_note_rescue_ms
+                        ),
+                        rescue_confidence=(
+                            args.bass_short_note_rescue_confidence
+                            if role == "bass"
+                            else args.short_note_rescue_confidence
+                        ),
+                        rescue_onset=(
+                            args.bass_short_note_rescue_onset
+                            if role == "bass"
+                            else args.short_note_rescue_onset
+                        ),
+                        fusion_consensus_bonus=args.fusion_consensus_bonus,
+                        pass_unique_confidence=args.pass_unique_confidence,
+                        decoder_passes=args.decoder_passes,
+                        decoder_extra_context_ms=args.decoder_extra_context_ms,
+                        tmp_dir=tmp_dir,
+                    )
+                except Exception as exc:
+                    print(
+                        f"  [WARN] {role} segment "
+                        f"{window['segment_index']:04d} fusion: {exc}",
+                        file=sys.stderr,
+                    )
+                    best = None
 
-                for source in candidates:
-                    try:
-                        result = analyze_candidate(
-                            source_name=source.name,
-                            source_audio=source.pitch_audio,
-                            attack_audio=source.attack_audio,
-                            sr=ANALYSIS_SR,
-                            window=window,
-                            transcriber=transcriber,
-                            fps=args.viterbi_fps,
-                            bridge_gap_ms=args.bridge_gap_ms,
-                            min_output_note_ms=(
-                                args.bass_min_output_note_ms
-                                if role == "bass"
-                                else args.min_output_note_ms
-                            ),
-                            retrigger_min_ms=(
-                                args.bass_retrigger_min_ms
-                                if role == "bass"
-                                else args.retrigger_min_ms
-                            ),
-                            retrigger_pitch_tolerance=args.retrigger_pitch_tolerance,
-                            raw_active_threshold=args.raw_active_threshold,
-                            raw_retrigger_threshold=(
-                                args.bass_raw_retrigger_threshold
-                                if role == "bass"
-                                else args.raw_retrigger_threshold
-                            ),
-                            attack_onset_weight=(
-                                args.bass_attack_onset_weight
-                                if role == "bass"
-                                else args.attack_onset_weight
-                            ),
-                            tempo_bpm=tempo,
-                            tempo_retrigger_fraction=args.tempo_retrigger_fraction,
-                            retrigger_split_penalty=(
-                                args.bass_retrigger_split_penalty
-                                if role == "bass"
-                                else args.retrigger_split_penalty
-                            ),
-                            retrigger_dip_window_ms=args.retrigger_dip_window_ms,
-                            retrigger_min_dip=args.retrigger_min_dip,
-                            retrigger_strong_margin=args.retrigger_strong_margin,
-                            cleanup_fragment_ms=(
-                                max(args.cleanup_fragment_ms, 120.0)
-                                if role == "bass"
-                                else args.cleanup_fragment_ms
-                            ),
-                            cleanup_confidence=args.cleanup_confidence,
-                            cleanup_max_semitones=args.cleanup_max_semitones,
-                            decode_min_midi=source.min_midi,
-                            decode_max_midi=source.max_midi,
-                            decoder_passes=args.decoder_passes,
-                            decoder_extra_context_ms=args.decoder_extra_context_ms,
-                            tmp_dir=tmp_dir,
-                        )
-                        results.append(result)
-                    except Exception as exc:
-                        print(
-                            f"  [WARN] {role} segment "
-                            f"{window['segment_index']:04d} "
-                            f"{source.name}: {exc}",
-                            file=sys.stderr,
-                        )
-
-                if not results:
+                if best is None:
                     rejected_count += 1
                     rejected_writer.writerow(
                         {
@@ -2765,7 +3522,6 @@ def process_song(
                     )
                     continue
 
-                best = max(results, key=lambda r: r.score)
                 ok, reason = accepted_for_role(
                     best,
                     args,
@@ -2952,6 +3708,12 @@ def main() -> int:
         raise SystemExit("--retrigger-pitch-tolerance must be >= 0")
     if not 0.0 <= args.raw_active_threshold <= 1.0:
         raise SystemExit("--raw-active-threshold must be 0..1")
+    if not 0.0 <= args.raw_stay_threshold <= args.raw_active_threshold:
+        raise SystemExit(
+            "--raw-stay-threshold must satisfy 0 <= stay <= active/enter"
+        )
+    if not 0.0 <= args.fusion_consensus_bonus <= 0.50:
+        raise SystemExit("--fusion-consensus-bonus must be 0..0.50")
     if not 0.0 <= args.raw_retrigger_threshold <= 1.0:
         raise SystemExit("--raw-retrigger-threshold must be 0..1")
     if not 0.0 <= args.attack_onset_weight <= 0.40:
@@ -2972,8 +3734,22 @@ def main() -> int:
         raise SystemExit("--cleanup-confidence must be 0..1")
     if args.cleanup_max_semitones < 0:
         raise SystemExit("--cleanup-max-semitones must be >= 0")
+    if args.short_note_rescue_ms < 0.0:
+        raise SystemExit("--short-note-rescue-ms must be >= 0")
+    if not 0.0 <= args.short_note_rescue_confidence <= 1.0:
+        raise SystemExit("--short-note-rescue-confidence must be 0..1")
+    if not 0.0 <= args.short_note_rescue_onset <= 1.0:
+        raise SystemExit("--short-note-rescue-onset must be 0..1")
+    if not 0.0 <= args.pass_unique_confidence <= 1.0:
+        raise SystemExit("--pass-unique-confidence must be 0..1")
     if args.bass_min_output_note_ms < 0.0:
         raise SystemExit("--bass-min-output-note-ms must be >= 0")
+    if args.bass_short_note_rescue_ms < 0.0:
+        raise SystemExit("--bass-short-note-rescue-ms must be >= 0")
+    if not 0.0 <= args.bass_short_note_rescue_confidence <= 1.0:
+        raise SystemExit("--bass-short-note-rescue-confidence must be 0..1")
+    if not 0.0 <= args.bass_short_note_rescue_onset <= 1.0:
+        raise SystemExit("--bass-short-note-rescue-onset must be 0..1")
     if not 0.0 <= args.bass_raw_retrigger_threshold <= 1.0:
         raise SystemExit("--bass-raw-retrigger-threshold must be 0..1")
     if not 0.0 <= args.bass_attack_onset_weight <= 0.40:
