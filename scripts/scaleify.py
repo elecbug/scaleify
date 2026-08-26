@@ -7,13 +7,20 @@ Pipeline
 MP3/WAV/FLAC/... -> robust decode -> mono melody F0 -> note events -> phrase
 segmentation -> higher-order Viterbi melodic grammar -> rhythm rewrite ->
 degree-conditioned ornaments + optional microtuning + optional learned
-register placement -> resynthesis -> output-level normalization -> reports.
+register placement -> source-audio transformation or resynthesis ->
+output-level normalization -> reports.
 
 Register placement is opt-in. Existing style profiles without a ``register``
 section remain fully compatible and preserve the previous behavior.
 Final output uses active-RMS loudness normalization by default (-16 dBFS)
 with a -1 dBFS soft peak ceiling while preserving event-to-event dynamics.
 v9 is intentionally focused on isolated or predominantly monophonic melody input.
+
+Render modes
+------------
+synth  : existing behavior; synthesize a new tone for each mapped note.
+source : preserve the original note timbre by pitch-shifting/time-stretching
+         each detected source-note segment and reconstructing the melody.
 """
 
 from __future__ import annotations
@@ -753,6 +760,134 @@ def synth_event(
     return (tone * env * amplitude).astype(np.float32)
 
 
+
+def _edge_fade(
+    audio: np.ndarray,
+    sr: int,
+    fade_ms: float = 6.0,
+) -> np.ndarray:
+    """Apply a short symmetric edge fade to suppress splice clicks."""
+    x = np.asarray(audio, dtype=np.float32).copy()
+    n = len(x)
+    if n <= 2:
+        return x
+
+    fade = min(
+        n // 2,
+        max(1, int(round(float(fade_ms) / 1000.0 * sr))),
+    )
+
+    if fade > 1:
+        ramp = np.sin(
+            np.linspace(0.0, np.pi / 2.0, fade, dtype=np.float64)
+        ) ** 2
+        x[:fade] *= ramp.astype(np.float32)
+        x[-fade:] *= ramp[::-1].astype(np.float32)
+
+    return x
+
+
+def transform_source_event(
+    y: np.ndarray,
+    sr: int,
+    hop_length: int,
+    event: NoteEvent,
+    target_midi: int,
+    output_duration_s: float,
+    root_pc: int,
+    profile: StyleProfile,
+    enable_microtuning: bool,
+    fade_ms: float = 6.0,
+) -> np.ndarray:
+    """
+    Transform one detected source note while preserving its original timbre.
+
+    The source event is cropped directly from the input waveform, shifted by
+    the mapped semitone distance (including optional profile microtuning), and
+    time-stretched only when rhythm rewriting changes its duration.
+
+    This is appropriate for isolated/predominantly monophonic input. Applying
+    it directly to a dense full mix would also transform accompaniment inside
+    each event region.
+    """
+    start = max(0, int(event.start_frame * hop_length))
+    end = min(
+        len(y),
+        max(start + 1, int(event.end_frame * hop_length)),
+    )
+
+    segment = np.asarray(y[start:end], dtype=np.float32)
+
+    if len(segment) == 0:
+        return np.zeros(
+            max(1, int(round(output_duration_s * sr))),
+            dtype=np.float32,
+        )
+
+    source_midi = float(event.source_midi)
+    tuning_cents = degree_tuning_cents(
+        int(target_midi),
+        root_pc,
+        profile,
+        enable_microtuning,
+    )
+
+    n_steps = (
+        float(target_midi)
+        - source_midi
+        + tuning_cents / 100.0
+    )
+
+    # librosa pitch_shift preserves duration.
+    if abs(n_steps) > 1e-4 and len(segment) >= 32:
+        try:
+            segment = librosa.effects.pitch_shift(
+                segment,
+                sr=sr,
+                n_steps=n_steps,
+            ).astype(np.float32)
+        except Exception:
+            # Keep the original segment rather than dropping the note if a
+            # very short/degenerate event cannot be phase-vocoder processed.
+            segment = np.asarray(y[start:end], dtype=np.float32)
+
+    desired_len = max(
+        1,
+        int(round(float(output_duration_s) * sr)),
+    )
+
+    # Rhythm rewrite: stretch/compress while preserving the already-shifted
+    # pitch. librosa rate = input_duration / desired_duration.
+    if len(segment) >= 64 and abs(len(segment) - desired_len) > 2:
+        rate = len(segment) / max(desired_len, 1)
+
+        try:
+            stretched = librosa.effects.time_stretch(
+                segment,
+                rate=float(rate),
+            ).astype(np.float32)
+            segment = librosa.util.fix_length(
+                stretched,
+                size=desired_len,
+            ).astype(np.float32)
+        except Exception:
+            segment = librosa.util.fix_length(
+                segment,
+                size=desired_len,
+            ).astype(np.float32)
+    else:
+        segment = librosa.util.fix_length(
+            segment,
+            size=desired_len,
+        ).astype(np.float32)
+
+    return _edge_fade(
+        segment,
+        sr=sr,
+        fade_ms=fade_ms,
+    )
+
+
 def active_rms(
     audio: np.ndarray,
     threshold_db: float = -45.0,
@@ -919,6 +1054,8 @@ def render_mapping(
     mapping: MappingResult,
     profile: StyleProfile,
     timbre: str,
+    render_mode: str,
+    source_fade_ms: float,
     style_amount: float,
     rhythm_amount: float,
     enable_ornaments: bool,
@@ -969,20 +1106,35 @@ def render_mapping(
             flat_rms_index += 1
             amplitude = np.clip(0.12 + 0.62 * (local_rms / max(reference_rms, 1e-8)), 0.12, 0.85)
 
-            note_audio = synth_event(
-                target_midi=target,
-                duration_s=float(out_dur[eidx]),
-                amplitude=float(amplitude),
-                root_pc=root_pc,
-                scale=scale,
-                profile=profile,
-                sr=sr,
-                timbre=timbre,
-                style_amount=style_amount,
-                enable_ornaments=enable_ornaments,
-                enable_microtuning=enable_microtuning,
-                rng=rng,
-            )
+            if render_mode == "source":
+                note_audio = transform_source_event(
+                    y=y,
+                    sr=sr,
+                    hop_length=hop_length,
+                    event=event,
+                    target_midi=int(target),
+                    output_duration_s=float(out_dur[eidx]),
+                    root_pc=root_pc,
+                    profile=profile,
+                    enable_microtuning=enable_microtuning,
+                    fade_ms=source_fade_ms,
+                )
+            else:
+                note_audio = synth_event(
+                    target_midi=target,
+                    duration_s=float(out_dur[eidx]),
+                    amplitude=float(amplitude),
+                    root_pc=root_pc,
+                    scale=scale,
+                    profile=profile,
+                    sr=sr,
+                    timbre=timbre,
+                    style_amount=style_amount,
+                    enable_ornaments=enable_ornaments,
+                    enable_microtuning=enable_microtuning,
+                    rng=rng,
+                )
+
             parts.append(note_audio)
 
             gap_after = float(gaps[eidx])
@@ -1260,6 +1412,25 @@ def main() -> None:
     )
     parser.add_argument("--timbre", choices=["sine", "flute", "reed", "pluck"], default="flute")
     parser.add_argument(
+        "--render-mode",
+        choices=["synth", "source"],
+        default="synth",
+        help=(
+            "synth: generate new instrument tones (legacy behavior). "
+            "source: preserve original note timbre by transforming source "
+            "waveform segments. Default: synth."
+        ),
+    )
+    parser.add_argument(
+        "--source-fade-ms",
+        type=float,
+        default=6.0,
+        help=(
+            "Edge crossfade applied to each transformed source-note segment "
+            "in --render-mode source. Default: 6 ms."
+        ),
+    )
+    parser.add_argument(
         "--output-rms-db",
         type=float,
         default=-16.0,
@@ -1344,6 +1515,8 @@ def main() -> None:
         parser.error("--master-gain-db must be finite")
     if not np.isfinite(args.limiter_drive) or args.limiter_drive < 1.0:
         parser.error("--limiter-drive must be a finite value >= 1.0")
+    if not np.isfinite(args.source_fade_ms) or args.source_fade_ms < 0.0:
+        parser.error("--source-fade-ms must be a finite value >= 0")
 
     profile = profiles[args.style]
 
@@ -1457,6 +1630,8 @@ def main() -> None:
         mapping=mapping,
         profile=profile,
         timbre=args.timbre,
+        render_mode=args.render_mode,
+        source_fade_ms=float(args.source_fade_ms),
         style_amount=args.style_amount,
         rhythm_amount=rhythm_amount,
         enable_ornaments=not args.no_ornaments,
@@ -1468,7 +1643,14 @@ def main() -> None:
         limiter_drive=float(args.limiter_drive),
     )
 
-    output = args.output or args.input.with_name(f"{args.input.stem}_{profile.id}_v9_1.wav")
+    output_suffix = (
+        f"{profile.id}_source_v9_1"
+        if args.render_mode == "source"
+        else f"{profile.id}_v9_1"
+    )
+    output = args.output or args.input.with_name(
+        f"{args.input.stem}_{output_suffix}.wav"
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), render.audio, sr, subtype="PCM_24")
 
@@ -1530,10 +1712,27 @@ def main() -> None:
             else None
         ),
         "pitch_method": args.pitch_method,
+        "render_mode": args.render_mode,
+        "source_fade_ms": (
+            float(args.source_fade_ms)
+            if args.render_mode == "source"
+            else None
+        ),
+        "source_ornaments_applied": (
+            False
+            if args.render_mode == "source"
+            else not args.no_ornaments
+        ),
     })
     metrics_path.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"Saved audio:   {output}")
+    print(f"Render mode:   {args.render_mode}")
+    if args.render_mode == "source" and not args.no_ornaments:
+        print(
+            "[info] source render preserves the original waveform; "
+            "profile ornaments are not synthesized in this mode."
+        )
     if args.no_output_normalize:
         print("Output level:  normalization disabled")
     else:
