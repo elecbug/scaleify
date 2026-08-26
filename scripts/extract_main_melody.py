@@ -13,9 +13,10 @@ Design
 6. Transcribe each candidate source with Spotify Basic Pitch.
 7. Collapse polyphonic note candidates into one melody line using a
    continuity-aware Viterbi path.
-8. Keep only high-confidence segments.
-9. Resynthesize each accepted segment as a clean monophonic WAV.
-10. Reassemble accepted segments on the original song timeline into a
+8. Preserve same-pitch re-attacks using Basic Pitch onset boundaries.
+9. Keep only high-confidence segments.
+10. Resynthesize each accepted segment as a clean monophonic WAV.
+11. Reassemble accepted segments on the original song timeline into a
     per-song total WAV.
 11. Preserve source-separation stems for inspection/reuse.
 12. Write metadata.csv and rejected.csv.
@@ -170,6 +171,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--viterbi-fps", type=float, default=50.0)
     p.add_argument("--min-output-note-ms", type=float, default=90.0)
     p.add_argument("--bridge-gap-ms", type=float, default=70.0)
+    p.add_argument(
+        "--retrigger-min-ms",
+        type=float,
+        default=70.0,
+        help=(
+            "Minimum spacing between same-pitch re-attack boundaries derived "
+            "from Basic Pitch note onsets. Default: 70 ms."
+        ),
+    )
+    p.add_argument(
+        "--retrigger-pitch-tolerance",
+        type=int,
+        default=0,
+        help=(
+            "Allow an onset to retrigger the Viterbi note when its Basic Pitch "
+            "pitch differs by at most this many semitones. Default: 0."
+        ),
+    )
 
     p.add_argument("--min-score", type=float, default=0.58)
     p.add_argument("--min-voiced-ratio", type=float, default=0.18)
@@ -509,6 +528,106 @@ def note_events_to_confidence_grid(
     return grid
 
 
+
+def note_events_to_onset_grid(
+    events: Iterable[tuple],
+    duration_s: float,
+    fps: float,
+) -> np.ndarray:
+    """
+    Convert Basic Pitch note-event starts into a pitch x frame onset grid.
+
+    Unlike the confidence grid, this preserves repeated attacks of the same
+    MIDI pitch. A sequence such as G-G-G therefore retains three boundaries
+    even when the Viterbi pitch path itself remains continuously on G.
+    """
+    n_frames = max(1, int(math.ceil(duration_s * fps)))
+    onset_grid = np.zeros((128, n_frames), dtype=np.float32)
+
+    for event in events:
+        if len(event) < 4:
+            continue
+
+        start, end, pitch, amplitude = event[:4]
+        pitch = int(round(float(pitch)))
+        amplitude = float(amplitude)
+
+        if not (0 <= pitch <= 127):
+            continue
+        if float(end) <= float(start):
+            continue
+
+        frame = int(round(float(start) * fps))
+        frame = int(np.clip(frame, 0, n_frames - 1))
+
+        onset_grid[pitch, frame] = max(
+            float(onset_grid[pitch, frame]),
+            amplitude,
+        )
+
+    return onset_grid
+
+
+def retrigger_boundaries_from_onsets(
+    path: np.ndarray,
+    onset_grid: np.ndarray,
+    fps: float,
+    min_spacing_ms: float,
+    pitch_tolerance: int,
+    onset_threshold: float = 0.08,
+) -> np.ndarray:
+    """
+    Return a boolean frame mask marking re-attack boundaries.
+
+    A boundary is accepted when:
+    - the Viterbi state is a sounding note,
+    - Basic Pitch reports a note onset at the same pitch (or within the
+      configured tolerance),
+    - the boundary is not the first frame of a newly changed Viterbi pitch,
+    - it is sufficiently far from the previous retrigger boundary.
+
+    The second condition is what prevents repeated same-pitch notes from
+    collapsing into one sustained event.
+    """
+    n = len(path)
+    boundaries = np.zeros(n, dtype=bool)
+
+    if n == 0:
+        return boundaries
+
+    min_frames = max(
+        1,
+        int(round(min_spacing_ms / 1000.0 * fps)),
+    )
+
+    last_boundary = -min_frames
+
+    for t in range(1, n):
+        state = int(path[t])
+
+        if state == REST_STATE:
+            continue
+
+        # Pitch changes are already split naturally by path_to_notes().
+        # We only need extra boundaries while the same pitch continues.
+        if int(path[t - 1]) != state:
+            continue
+
+        lo = max(0, state - pitch_tolerance)
+        hi = min(127, state + pitch_tolerance)
+
+        if float(np.max(onset_grid[lo:hi + 1, t])) < onset_threshold:
+            continue
+
+        if t - last_boundary < min_frames:
+            continue
+
+        boundaries[t] = True
+        last_boundary = t
+
+    return boundaries
+
+
 def transition_cost(prev_state: int, state: int) -> float:
     if prev_state == REST_STATE and state == REST_STATE:
         return 0.0
@@ -630,6 +749,7 @@ def viterbi_monophonic_path(
 def bridge_short_gaps(
     path: np.ndarray,
     max_gap_frames: int,
+    protected_boundaries: np.ndarray | None = None,
 ) -> np.ndarray:
     out = path.copy()
     n = len(out)
@@ -646,12 +766,19 @@ def bridge_short_gaps(
 
         gap_len = j - i
 
+        protected = False
+        if protected_boundaries is not None:
+            left = max(0, i)
+            right = min(len(protected_boundaries), j + 1)
+            protected = bool(np.any(protected_boundaries[left:right]))
+
         if (
             gap_len <= max_gap_frames
             and i > 0
             and j < n
             and out[i - 1] == out[j]
             and out[i - 1] != REST_STATE
+            and not protected
         ):
             out[i:j] = out[i - 1]
 
@@ -665,6 +792,7 @@ def path_to_notes(
     confidence: np.ndarray,
     fps: float,
     min_note_ms: float,
+    retrigger_boundaries: np.ndarray | None = None,
 ) -> list[Note]:
     notes: list[Note] = []
     n = len(path)
@@ -679,6 +807,11 @@ def path_to_notes(
 
         j = i + 1
         while j < n and int(path[j]) == state:
+            if (
+                retrigger_boundaries is not None
+                and bool(retrigger_boundaries[j])
+            ):
+                break
             j += 1
 
         start = i / fps
@@ -809,6 +942,8 @@ def analyze_candidate(
     fps: float,
     bridge_gap_ms: float,
     min_output_note_ms: float,
+    retrigger_min_ms: float,
+    retrigger_pitch_tolerance: int,
     tmp_dir: Path,
 ) -> CandidateResult:
     context_start = window["context_start"]
@@ -858,7 +993,23 @@ def analyze_candidate(
         fps=fps,
     )
 
+    onset_grid = note_events_to_onset_grid(
+        events,
+        duration_s=duration_s,
+        fps=fps,
+    )
+
     path, frame_conf = viterbi_monophonic_path(grid)
+
+    # First derive repeated-note boundaries from Basic Pitch onsets while the
+    # Viterbi state is still intact.
+    retrigger_boundaries = retrigger_boundaries_from_onsets(
+        path=path,
+        onset_grid=onset_grid,
+        fps=fps,
+        min_spacing_ms=retrigger_min_ms,
+        pitch_tolerance=retrigger_pitch_tolerance,
+    )
 
     bridge_frames = max(
         0,
@@ -868,7 +1019,11 @@ def analyze_candidate(
     path = bridge_short_gaps(
         path,
         max_gap_frames=bridge_frames,
+        protected_boundaries=retrigger_boundaries,
     )
+
+    # Bridging may fill rests but must not erase the already-detected
+    # same-pitch attack boundaries.
 
     # Rebuild confidence after bridging.
     for t, state in enumerate(path):
@@ -882,6 +1037,7 @@ def analyze_candidate(
         frame_conf,
         fps=fps,
         min_note_ms=min_output_note_ms,
+        retrigger_boundaries=retrigger_boundaries,
     )
 
     center_offset = (
@@ -1366,6 +1522,8 @@ def process_song(
                         fps=args.viterbi_fps,
                         bridge_gap_ms=args.bridge_gap_ms,
                         min_output_note_ms=args.min_output_note_ms,
+                        retrigger_min_ms=args.retrigger_min_ms,
+                        retrigger_pitch_tolerance=args.retrigger_pitch_tolerance,
                         tmp_dir=tmp_dir,
                     )
                     results.append(result)
@@ -1558,6 +1716,10 @@ def main() -> int:
 
     if args.hpss_margin < 1.0:
         raise SystemExit("--hpss-margin must be >= 1.0")
+    if args.retrigger_min_ms < 0:
+        raise SystemExit("--retrigger-min-ms must be >= 0")
+    if args.retrigger_pitch_tolerance < 0:
+        raise SystemExit("--retrigger-pitch-tolerance must be >= 0")
 
     files = find_mp3s(
         input_root,
