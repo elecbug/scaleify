@@ -1574,14 +1574,6 @@ def main() -> int:
                     file=sys.stderr,
                 )
 
-    # Stems are intermediate data and can be large.
-    stems_dir = output_root / "_stems"
-    if stems_dir.exists():
-        try:
-            shutil.rmtree(stems_dir)
-        except Exception:
-            pass
-
     print()
     print(
         "Done. "
