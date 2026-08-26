@@ -52,7 +52,7 @@ FORCE_TRAINING=0
 
 STYLE_AMOUNT=1.0
 RHYTHM_AMOUNT=0.7
-RENDER_MODE=source #synth
+RENDER_MODE=synth #source
 TIMBRE=flute
 
 ensure_venv() {
