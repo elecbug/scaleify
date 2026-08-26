@@ -13,10 +13,12 @@ Design
 6. Transcribe each candidate source with Spotify Basic Pitch.
 7. Decode Basic Pitch RAW note/onset/contour activations directly at native
    model-frame resolution.
-8. Fuse neural onset, inferred frame-rise onset, and waveform onset evidence.
-9. Collapse polyphonic activations into one melody line with Viterbi.
-10. Preserve same-pitch re-attacks from the fused onset posterior.
-11. Keep only high-confidence segments.
+8. Use HPSS/harmonic audio for pitch tracking and the corresponding RAW stem
+   for pitch-local attack detection.
+9. Fuse neural onset, frame-rise onset, and pitch-local CQT attack evidence.
+10. Decode same-pitch re-attacks with a duration-aware dynamic program.
+11. Extract MAIN and BASS roles independently.
+12. Keep only high-confidence segments for each role.
 10. Resynthesize each accepted segment as a clean monophonic WAV.
 11. Reassemble accepted segments on the original song timeline into a
     per-song total WAV.
@@ -48,7 +50,10 @@ Notes:
   fallback if raw outputs are unavailable.
 - If source separation is unavailable, use --no-separation.
 - Separated stems are preserved under <output>/_stems/.
-- Reassembled per-song outputs are written under <output>/total/.
+- Reassembled per-song outputs are written separately under
+  <output>/total/main/ and <output>/total/bass/.
+- Accepted training segments are likewise separated into
+  <output>/wav/main/ and <output>/wav/bass/.
 """
 
 from __future__ import annotations
@@ -108,6 +113,16 @@ class CandidateResult:
 class BasicPitchPrediction:
     model_output: dict[str, np.ndarray]
     note_events: list[tuple]
+
+
+@dataclass
+class AnalysisSource:
+    name: str
+    pitch_audio: np.ndarray
+    attack_audio: np.ndarray
+    role: str
+    min_midi: int
+    max_midi: int
 
 
 def parse_args() -> argparse.Namespace:
@@ -180,7 +195,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--minimum-note-ms", type=float, default=80.0)
 
     p.add_argument("--viterbi-fps", type=float, default=50.0)
-    p.add_argument("--min-output-note-ms", type=float, default=90.0)
+    p.add_argument("--min-output-note-ms", type=float, default=60.0)
     p.add_argument("--bridge-gap-ms", type=float, default=70.0)
     p.add_argument(
         "--retrigger-min-ms",
@@ -219,14 +234,68 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--attack-onset-weight",
         "--waveform-onset-weight",
+        dest="attack_onset_weight",
         type=float,
-        default=0.15,
+        default=0.22,
         help=(
-            "Weight of waveform spectral-onset evidence in the fused retrigger "
-            "score. It is gated by neural evidence. Default: 0.15."
+            "Weight of pitch-local CQT attack evidence from the RAW stem in "
+            "the fused retrigger score. Default: 0.22."
         ),
     )
+    p.add_argument(
+        "--tempo-retrigger-fraction",
+        type=float,
+        default=0.125,
+        help=(
+            "Tempo-aware minimum same-pitch retrigger spacing as a fraction "
+            "of one beat. Combined with --retrigger-min-ms. Default: 0.125."
+        ),
+    )
+    p.add_argument(
+        "--retrigger-split-penalty",
+        type=float,
+        default=0.18,
+        help=(
+            "Dynamic-program penalty for inserting a same-pitch boundary. "
+            "Higher values suppress over-segmentation. Default: 0.18."
+        ),
+    )
+    p.add_argument(
+        "--decoder-passes",
+        type=int,
+        choices=[1, 2],
+        default=2,
+        help=(
+            "Analyze each candidate with one context or with a two-context "
+            "ensemble and keep the higher-quality decode. Default: 2."
+        ),
+    )
+    p.add_argument(
+        "--decoder-extra-context-ms",
+        type=float,
+        default=350.0,
+        help=(
+            "Extra context on each side for decoder pass 2. Default: 350 ms."
+        ),
+    )
+    p.add_argument(
+        "--bass-min-midi",
+        type=int,
+        default=28,
+        help="Lowest MIDI pitch for the bass role. Default: 28 (E1).",
+    )
+    p.add_argument(
+        "--bass-max-midi",
+        type=int,
+        default=67,
+        help="Highest MIDI pitch for the bass role. Default: 67 (G4).",
+    )
+    p.add_argument("--bass-min-score", type=float, default=0.50)
+    p.add_argument("--bass-min-voiced-ratio", type=float, default=0.15)
+    p.add_argument("--bass-min-mean-confidence", type=float, default=0.30)
+    p.add_argument("--bass-min-notes", type=int, default=2)
 
     p.add_argument("--min-score", type=float, default=0.58)
     p.add_argument("--min-voiced-ratio", type=float, default=0.18)
@@ -613,83 +682,115 @@ def infer_frame_rise_onsets(
     return np.asarray(frame_diff, dtype=np.float32)
 
 
-def waveform_onset_curve(
+def pitch_local_attack_grid(
     audio: np.ndarray,
     sr: int,
     n_frames: int,
+    min_midi: int,
+    max_midi: int,
 ) -> np.ndarray:
     """
-    Compute a pitch-agnostic spectral onset curve and interpolate it onto the
-    Basic Pitch raw model-frame timeline.
+    Pitch-local spectral-flux attack evidence from the RAW stem.
+
+    Unlike a global onset envelope, this follows the fundamental and low
+    harmonics of each candidate MIDI pitch. A drum transient therefore does
+    not automatically become a same-pitch retrigger unless energy also rises
+    around the currently tracked harmonic series.
     """
-    if n_frames <= 0:
-        return np.zeros(0, dtype=np.float32)
+    out = np.zeros((128, n_frames), dtype=np.float32)
 
-    onset_env = librosa.onset.onset_strength(
-        y=np.asarray(audio, dtype=np.float32),
-        sr=sr,
-        hop_length=256,
-    ).astype(np.float32)
+    if n_frames <= 0 or len(audio) < 512:
+        return out
 
-    if len(onset_env) == 0:
-        return np.zeros(n_frames, dtype=np.float32)
+    cqt_min_midi = max(21, min_midi)
+    cqt_max_midi = min(108, max_midi + 24)
+    if cqt_max_midi <= cqt_min_midi:
+        return out
 
-    positive = onset_env[onset_env > 0]
-    scale = (
-        float(np.percentile(positive, 95))
-        if len(positive)
-        else float(np.max(onset_env))
-    )
+    n_bins = cqt_max_midi - cqt_min_midi + 1
+    try:
+        cqt = librosa.cqt(
+            y=np.asarray(audio, dtype=np.float32),
+            sr=sr,
+            hop_length=256,
+            fmin=midi_to_hz(cqt_min_midi),
+            n_bins=n_bins,
+            bins_per_octave=12,
+        )
+    except Exception:
+        return out
 
-    if scale > 1e-12:
-        onset_env = np.clip(onset_env / scale, 0.0, 1.0)
-    else:
-        onset_env[:] = 0.0
+    mag = np.abs(cqt).astype(np.float32)
+    log_mag = np.log1p(12.0 * mag)
 
-    if len(onset_env) == 1:
-        return np.full(
-            n_frames,
-            float(onset_env[0]),
-            dtype=np.float32,
+    flux = np.zeros_like(log_mag)
+    if log_mag.shape[1] > 1:
+        flux[:, 1:] = np.maximum(
+            0.0,
+            log_mag[:, 1:] - log_mag[:, :-1],
         )
 
-    source_x = np.linspace(
-        0.0,
-        1.0,
-        len(onset_env),
-        dtype=np.float64,
-    )
-    target_x = np.linspace(
-        0.0,
-        1.0,
-        n_frames,
-        dtype=np.float64,
-    )
+    source_x = np.linspace(0.0, 1.0, flux.shape[1], dtype=np.float64)
+    target_x = np.linspace(0.0, 1.0, n_frames, dtype=np.float64)
 
-    return np.interp(
-        target_x,
-        source_x,
-        onset_env,
-    ).astype(np.float32)
+    # Fundamental, 2nd, 3rd and 4th harmonics in semitone offsets.
+    harmonic_offsets = (0, 12, 19, 24)
+    harmonic_weights = (0.55, 0.24, 0.13, 0.08)
+
+    for midi in range(max(0, min_midi), min(127, max_midi) + 1):
+        curve = np.zeros(flux.shape[1], dtype=np.float32)
+        weight_sum = 0.0
+
+        for offset, weight in zip(harmonic_offsets, harmonic_weights):
+            hm = midi + offset
+            idx = hm - cqt_min_midi
+            if 0 <= idx < flux.shape[0]:
+                curve += float(weight) * flux[idx]
+                weight_sum += float(weight)
+
+        if weight_sum <= 0:
+            continue
+
+        curve /= weight_sum
+        positive = curve[curve > 0]
+        scale = (
+            float(np.percentile(positive, 95))
+            if len(positive)
+            else float(np.max(curve))
+        )
+
+        if scale > 1e-12:
+            curve = np.clip(curve / scale, 0.0, 1.0)
+        else:
+            continue
+
+        if len(curve) == 1:
+            out[midi, :] = float(curve[0])
+        else:
+            out[midi, :] = np.interp(
+                target_x,
+                source_x,
+                curve,
+            ).astype(np.float32)
+
+    return out
 
 
 def raw_basic_pitch_decoder_inputs(
     prediction: BasicPitchPrediction,
-    context_audio: np.ndarray,
+    pitch_context_audio: np.ndarray,
+    attack_context_audio: np.ndarray,
     sr: int,
     min_midi: int,
     max_midi: int,
-    waveform_weight: float,
+    attack_weight: float,
 ) -> tuple[np.ndarray, np.ndarray, float] | None:
     """
-    Convert Basic Pitch raw model outputs into:
-      - 128 x T melodic salience grid
-      - 128 x T fused onset/retrigger grid
-      - native effective frames/second
+    Build pitch salience and fused re-attack evidence.
 
-    Note output has 88 piano-key bins (MIDI 21..108).
-    Contour output has three sub-bins per semitone and is reduced to a
-    semitone-level confidence via max pooling.
+    Basic Pitch runs on the pitch-oriented source (normally HPSS harmonic).
+    Pitch-local CQT flux is measured independently on the corresponding RAW
+    stem, preserving attack transients that HPSS may weaken.
     """
     model_output = prediction.model_output
 
@@ -716,15 +817,14 @@ def raw_basic_pitch_decoder_inputs(
     onsets = np.clip(onsets[:t_count], 0.0, 1.0)
 
     contour_semis = np.zeros_like(notes)
-
     contour = model_output.get("contour")
+
     if contour is not None:
         contour_matrix = _time_frequency_matrix(
             contour,
             BASIC_PITCH_NOTE_BINS
             * BASIC_PITCH_CONTOUR_BINS_PER_SEMITONE,
         )
-
         if contour_matrix is not None and len(contour_matrix) >= t_count:
             contour_matrix = np.clip(
                 contour_matrix[:t_count],
@@ -740,8 +840,6 @@ def raw_basic_pitch_decoder_inputs(
                 axis=2,
             )
 
-    # Melodic pitch salience: the note head remains dominant, while contour
-    # helps retain a stable melodic path through weaker note activations.
     salience_88 = np.clip(
         0.82 * notes
         + 0.18 * contour_semis
@@ -756,52 +854,44 @@ def raw_basic_pitch_decoder_inputs(
         n_diff=2,
     )
 
-    waveform = waveform_onset_curve(
-        context_audio,
-        sr,
-        t_count,
-    )
-
-    # Global waveform attacks are useful for repeated synth notes, but drum
-    # residuals must not split notes by themselves. Gate the waveform term by
-    # neural onset/rise support for each pitch.
-    neural_support = np.maximum(onsets, frame_rise)
-    waveform_gate = np.clip(
-        neural_support / 0.22,
-        0.0,
-        1.0,
-    )
-
-    w_wave = float(np.clip(waveform_weight, 0.0, 0.40))
-    w_onset = 0.60
-    w_rise = max(0.0, 1.0 - w_onset - w_wave)
-
-    fused_onset_88 = np.clip(
-        w_onset * onsets
-        + w_rise * frame_rise
-        + w_wave * waveform[:, None] * waveform_gate,
-        0.0,
-        1.0,
+    local_attack = pitch_local_attack_grid(
+        audio=attack_context_audio,
+        sr=sr,
+        n_frames=t_count,
+        min_midi=min_midi,
+        max_midi=max_midi,
     )
 
     salience = np.zeros((128, t_count), dtype=np.float32)
-    fused_onset = np.zeros((128, t_count), dtype=np.float32)
+    onset128 = np.zeros((128, t_count), dtype=np.float32)
+    rise128 = np.zeros((128, t_count), dtype=np.float32)
 
     for idx in range(BASIC_PITCH_NOTE_BINS):
         midi = BASIC_PITCH_MIDI_OFFSET + idx
-
         if midi < min_midi or midi > max_midi:
             continue
-
         salience[midi] = salience_88[:, idx]
-        fused_onset[midi] = fused_onset_88[:, idx]
+        onset128[midi] = onsets[:, idx]
+        rise128[midi] = frame_rise[:, idx]
 
-    duration_s = len(context_audio) / max(sr, 1)
-    fps = (
-        float(t_count) / duration_s
-        if duration_s > 1e-9
-        else 0.0
+    w_attack = float(np.clip(attack_weight, 0.0, 0.40))
+    w_onset = 0.55
+    w_rise = max(0.0, 1.0 - w_onset - w_attack)
+
+    # Pitch-local attack can rescue a missed neural onset, but only while the
+    # corresponding note is actually salient.
+    attack_gate = np.clip(salience / 0.18, 0.0, 1.0)
+
+    fused_onset = np.clip(
+        w_onset * onset128
+        + w_rise * rise128
+        + w_attack * local_attack * attack_gate,
+        0.0,
+        1.0,
     )
+
+    duration_s = len(pitch_context_audio) / max(sr, 1)
+    fps = float(t_count) / duration_s if duration_s > 1e-9 else 0.0
 
     if fps <= 0:
         return None
@@ -809,20 +899,28 @@ def raw_basic_pitch_decoder_inputs(
     return salience, fused_onset, fps
 
 
-def retrigger_boundaries_from_raw(
+def duration_aware_retrigger_boundaries(
     path: np.ndarray,
     onset_score: np.ndarray,
     fps: float,
     threshold: float,
-    min_spacing_ms: float,
+    absolute_min_ms: float,
     min_note_ms: float,
     pitch_tolerance: int,
+    tempo_bpm: float,
+    tempo_fraction: float,
+    split_penalty: float,
 ) -> np.ndarray:
     """
-    Split same-pitch Viterbi runs at strong local onset maxima.
+    Select same-pitch re-attacks with dynamic programming.
 
-    Re-trigger decisions are made after short-gap bridging, so a repeated note
-    remains separable even when the pitch path itself is continuous.
+    Pitch tracking and note-boundary decoding are deliberately separated.
+    Within each continuous Viterbi pitch run, local onset maxima become
+    candidate boundaries. DP chooses a subset that maximizes onset evidence
+    while enforcing musically plausible note durations.
+
+    This is a lightweight semi-Markov decoder: a sustained G and G-G-G share
+    the same pitch path, but differ in the optimal internal boundary sequence.
     """
     n = len(path)
     boundaries = np.zeros(n, dtype=bool)
@@ -830,56 +928,116 @@ def retrigger_boundaries_from_raw(
     if n < 3:
         return boundaries
 
-    min_spacing_frames = max(
-        1,
-        int(round(min_spacing_ms / 1000.0 * fps)),
+    beat_ms = (
+        60000.0 / tempo_bpm
+        if tempo_bpm > 1e-6
+        else 500.0
     )
-    min_note_frames = max(
+    tempo_min_ms = max(0.0, beat_ms * max(0.0, tempo_fraction))
+    dynamic_min_ms = max(
+        float(absolute_min_ms),
+        float(min_note_ms),
+        tempo_min_ms,
+    )
+    min_frames = max(
         1,
-        int(round(min_note_ms / 1000.0 * fps)),
+        int(round(dynamic_min_ms / 1000.0 * fps)),
     )
 
-    last_split_or_change = 0
-
-    for t in range(1, n - 1):
-        state = int(path[t])
+    i = 0
+    while i < n:
+        state = int(path[i])
 
         if state == REST_STATE:
-            last_split_or_change = t
+            i += 1
             continue
 
-        if int(path[t - 1]) != state:
-            last_split_or_change = t
+        j = i + 1
+        while j < n and int(path[j]) == state:
+            j += 1
+
+        run_len = j - i
+        if run_len < 2 * min_frames + 1:
+            i = j
             continue
 
         lo = max(0, state - pitch_tolerance)
         hi = min(127, state + pitch_tolerance)
+        curve = np.max(onset_score[lo:hi + 1, i:j], axis=0)
 
-        center = float(np.max(onset_score[lo:hi + 1, t]))
-        if center < threshold:
+        candidates: list[tuple[int, float]] = []
+        for rel in range(1, run_len - 1):
+            score = float(curve[rel])
+            if score < threshold:
+                continue
+            if score < float(curve[rel - 1]) or score < float(curve[rel + 1]):
+                continue
+
+            pos = i + rel
+            if pos - i < min_frames or j - pos < min_frames:
+                continue
+
+            normalized = (
+                (score - threshold) / max(1e-6, 1.0 - threshold)
+            )
+            utility = normalized - float(split_penalty)
+
+            # Keep mildly negative candidates in the graph because a sequence
+            # of well-spaced attacks can still become optimal after duration
+            # constraints, but strongly negative evidence is useless.
+            if utility > -0.20:
+                candidates.append((pos, utility))
+
+        if not candidates:
+            i = j
             continue
 
-        left = float(np.max(onset_score[lo:hi + 1, t - 1]))
-        right = float(np.max(onset_score[lo:hi + 1, t + 1]))
+        # Weighted interval scheduling over candidate split points.
+        m = len(candidates)
+        best = np.zeros(m + 1, dtype=np.float64)
+        prev_choice = np.full(m + 1, -1, dtype=np.int32)
+        took = np.zeros(m + 1, dtype=bool)
 
-        # Local-maximum requirement prevents a broad onset plateau from
-        # producing several artificial repeated notes.
-        if center < left or center < right:
-            continue
+        positions = [p for p, _ in candidates]
 
-        if t - last_split_or_change < min_note_frames:
-            continue
+        for k in range(1, m + 1):
+            pos, utility = candidates[k - 1]
 
-        existing = np.flatnonzero(boundaries[:t])
-        last_boundary = int(existing[-1]) if len(existing) else -10**9
+            # Find latest earlier candidate far enough away.
+            prev_k = 0
+            for q in range(k - 1, 0, -1):
+                prev_pos = positions[q - 1]
+                if pos - prev_pos >= min_frames:
+                    prev_k = q
+                    break
 
-        if t - last_boundary < min_spacing_frames:
-            continue
+            take_score = best[prev_k] + utility
+            skip_score = best[k - 1]
 
-        boundaries[t] = True
-        last_split_or_change = t
+            if take_score > skip_score and utility > 0:
+                best[k] = take_score
+                prev_choice[k] = prev_k
+                took[k] = True
+            else:
+                best[k] = skip_score
+                prev_choice[k] = k - 1
+
+        k = m
+        chosen: list[int] = []
+        while k > 0:
+            if took[k]:
+                chosen.append(candidates[k - 1][0])
+                k = int(prev_choice[k])
+            else:
+                k -= 1
+
+        for pos in reversed(chosen):
+            boundaries[pos] = True
+
+        i = j
 
     return boundaries
+
 
 
 def note_events_to_confidence_grid(
@@ -1323,70 +1481,72 @@ def quality_metrics(
     )
 
 
-def analyze_candidate(
+def _decode_candidate_pass(
     source_name: str,
-    source_audio: np.ndarray,
+    pitch_audio: np.ndarray,
+    attack_audio: np.ndarray,
     sr: int,
-    window: dict,
+    analysis_start: float,
+    analysis_end: float,
+    center_start: float,
+    center_end: float,
     transcriber: BasicPitchTranscriber,
-    fps: float,
+    fallback_fps: float,
     bridge_gap_ms: float,
     min_output_note_ms: float,
     retrigger_min_ms: float,
     retrigger_pitch_tolerance: int,
     raw_active_threshold: float,
     raw_retrigger_threshold: float,
-    waveform_onset_weight: float,
+    attack_onset_weight: float,
+    tempo_bpm: float,
+    tempo_retrigger_fraction: float,
+    retrigger_split_penalty: float,
+    decode_min_midi: int,
+    decode_max_midi: int,
     tmp_dir: Path,
-) -> CandidateResult:
-    context_start = window["context_start"]
-    context_end = window["context_end"]
-
-    context = crop_audio(
-        source_audio,
+    pass_index: int,
+    segment_index: int,
+) -> list[Note]:
+    pitch_context = crop_audio(
+        pitch_audio,
         sr,
-        context_start,
-        context_end,
+        analysis_start,
+        analysis_end,
+    )
+    attack_context = crop_audio(
+        attack_audio,
+        sr,
+        analysis_start,
+        analysis_end,
     )
 
-    if len(context) < int(0.25 * sr):
-        bias = source_bias(source_name)
-        return CandidateResult(
-            source_name=source_name,
-            notes=[],
-            score=bias,
-            raw_score=0.0,
-            source_bias=bias,
-            voiced_ratio=0.0,
-            mean_confidence=0.0,
-            large_jump_ratio=1.0,
-            octave_jump_ratio=1.0,
-            note_count=0,
-        )
+    if len(pitch_context) < int(0.25 * sr):
+        return []
 
     context_wav = (
         tmp_dir
-        / f"segment_{window['segment_index']:04d}_{source_name}.wav"
+        / f"segment_{segment_index:04d}_{source_name}_p{pass_index}.wav"
     )
 
     sf.write(
         context_wav,
-        context,
+        pitch_context,
         sr,
         subtype="PCM_16",
     )
 
     prediction = transcriber.predict(context_wav)
-
-    duration_s = len(context) / sr
+    duration_s = len(pitch_context) / sr
 
     raw_inputs = raw_basic_pitch_decoder_inputs(
         prediction=prediction,
-        context_audio=context,
+        pitch_context_audio=pitch_context,
+        attack_context_audio=attack_context,
         sr=sr,
-        min_midi=transcriber.min_midi,
-        max_midi=transcriber.max_midi,
-        waveform_weight=waveform_onset_weight,
+        min_midi=decode_min_midi,
+        max_midi=decode_max_midi,
+        attack_weight=attack_onset_weight,
     )
 
     if raw_inputs is not None:
@@ -1401,62 +1561,63 @@ def analyze_candidate(
             0,
             int(round(bridge_gap_ms / 1000.0 * decoder_fps)),
         )
-
         path = bridge_short_gaps(
             path,
             max_gap_frames=bridge_frames,
         )
 
-        retrigger_boundaries = retrigger_boundaries_from_raw(
+        retrigger_boundaries = duration_aware_retrigger_boundaries(
             path=path,
             onset_score=fused_onset,
             fps=decoder_fps,
             threshold=raw_retrigger_threshold,
-            min_spacing_ms=retrigger_min_ms,
+            absolute_min_ms=retrigger_min_ms,
             min_note_ms=min_output_note_ms,
             pitch_tolerance=retrigger_pitch_tolerance,
+            tempo_bpm=tempo_bpm,
+            tempo_fraction=tempo_retrigger_fraction,
+            split_penalty=retrigger_split_penalty,
         )
-
         fps = decoder_fps
 
     else:
-        # Compatibility fallback for Basic Pitch runtimes that do not expose
-        # raw note/onset posteriorgrams in a usable shape.
-        events = prediction.note_events
+        # Compatibility fallback.
+        events = [
+            e
+            for e in prediction.note_events
+            if len(e) >= 3
+            and decode_min_midi <= int(round(float(e[2]))) <= decode_max_midi
+        ]
 
         grid = note_events_to_confidence_grid(
             events,
             duration_s=duration_s,
-            fps=fps,
+            fps=fallback_fps,
         )
-
         onset_grid = note_events_to_onset_grid(
             events,
             duration_s=duration_s,
-            fps=fps,
+            fps=fallback_fps,
         )
-
         path, frame_conf = viterbi_monophonic_path(grid)
 
         bridge_frames = max(
             0,
-            int(round(bridge_gap_ms / 1000.0 * fps)),
+            int(round(bridge_gap_ms / 1000.0 * fallback_fps)),
         )
-
         path = bridge_short_gaps(
             path,
             max_gap_frames=bridge_frames,
         )
-
         retrigger_boundaries = retrigger_boundaries_from_onsets(
             path=path,
             onset_grid=onset_grid,
-            fps=fps,
+            fps=fallback_fps,
             min_spacing_ms=retrigger_min_ms,
             pitch_tolerance=retrigger_pitch_tolerance,
         )
+        fps = fallback_fps
 
-    # Rebuild confidence after bridging.
     for t, state in enumerate(path):
         if state == REST_STATE:
             frame_conf[t] = 0.0
@@ -1471,21 +1632,109 @@ def analyze_candidate(
         retrigger_boundaries=retrigger_boundaries,
     )
 
-    center_offset = (
-        window["center_start"]
-        - window["context_start"]
-    )
-    center_duration = (
-        window["center_end"]
-        - window["center_start"]
-    )
+    center_offset = center_start - analysis_start
+    center_duration = center_end - center_start
 
-    notes = crop_notes_to_center(
+    return crop_notes_to_center(
         notes,
         center_offset_s=center_offset,
         center_duration_s=center_duration,
     )
 
+
+def analyze_candidate(
+    source_name: str,
+    source_audio: np.ndarray,
+    attack_audio: np.ndarray,
+    sr: int,
+    window: dict,
+    transcriber: BasicPitchTranscriber,
+    fps: float,
+    bridge_gap_ms: float,
+    min_output_note_ms: float,
+    retrigger_min_ms: float,
+    retrigger_pitch_tolerance: int,
+    raw_active_threshold: float,
+    raw_retrigger_threshold: float,
+    attack_onset_weight: float,
+    tempo_bpm: float,
+    tempo_retrigger_fraction: float,
+    retrigger_split_penalty: float,
+    decode_min_midi: int,
+    decode_max_midi: int,
+    decoder_passes: int,
+    decoder_extra_context_ms: float,
+    tmp_dir: Path,
+) -> CandidateResult:
+    total_duration = len(source_audio) / sr
+
+    pass_ranges = [
+        (
+            window["context_start"],
+            window["context_end"],
+        )
+    ]
+
+    if decoder_passes >= 2:
+        extra = max(0.0, decoder_extra_context_ms / 1000.0)
+        pass_ranges.append(
+            (
+                max(0.0, window["context_start"] - extra),
+                min(total_duration, window["context_end"] + extra),
+            )
+        )
+
+    decoded: list[tuple[list[Note], float]] = []
+
+    for pass_index, (analysis_start, analysis_end) in enumerate(
+        pass_ranges,
+        start=1,
+    ):
+        notes = _decode_candidate_pass(
+            source_name=source_name,
+            pitch_audio=source_audio,
+            attack_audio=attack_audio,
+            sr=sr,
+            analysis_start=analysis_start,
+            analysis_end=analysis_end,
+            center_start=window["center_start"],
+            center_end=window["center_end"],
+            transcriber=transcriber,
+            fallback_fps=fps,
+            bridge_gap_ms=bridge_gap_ms,
+            min_output_note_ms=min_output_note_ms,
+            retrigger_min_ms=retrigger_min_ms,
+            retrigger_pitch_tolerance=retrigger_pitch_tolerance,
+            raw_active_threshold=raw_active_threshold,
+            raw_retrigger_threshold=raw_retrigger_threshold,
+            attack_onset_weight=attack_onset_weight,
+            tempo_bpm=tempo_bpm,
+            tempo_retrigger_fraction=tempo_retrigger_fraction,
+            retrigger_split_penalty=retrigger_split_penalty,
+            decode_min_midi=decode_min_midi,
+            decode_max_midi=decode_max_midi,
+            tmp_dir=tmp_dir,
+            pass_index=pass_index,
+            segment_index=window["segment_index"],
+        )
+
+        center_duration = (
+            window["center_end"] - window["center_start"]
+        )
+        metrics = quality_metrics(
+            notes,
+            duration_s=center_duration,
+        )
+        decoded.append((notes, float(metrics[-1])))
+
+    # Multi-context ensemble: keep the decode with the better acoustic/path
+    # quality. This costs another Basic Pitch pass but is more robust when a
+    # note attack lies close to a context boundary.
+    notes = max(decoded, key=lambda item: item[1])[0] if decoded else []
+
+    center_duration = (
+        window["center_end"] - window["center_start"]
+    )
     (
         voiced_ratio,
         mean_confidence,
@@ -1512,6 +1761,7 @@ def analyze_candidate(
         octave_jump_ratio=octave_jump_ratio,
         note_count=note_count,
     )
+
 
 
 def synthesize_notes(
@@ -1597,6 +1847,30 @@ def accepted(
     return (len(reasons) == 0, ";".join(reasons))
 
 
+
+def accepted_for_role(
+    result: CandidateResult,
+    args: argparse.Namespace,
+    role: str,
+) -> tuple[bool, str]:
+    if role == "main":
+        return accepted(result, args)
+
+    reasons = []
+    if result.raw_score < args.bass_min_score:
+        reasons.append(f"score<{args.bass_min_score:.2f}")
+    if result.voiced_ratio < args.bass_min_voiced_ratio:
+        reasons.append(f"voiced<{args.bass_min_voiced_ratio:.2f}")
+    if result.mean_confidence < args.bass_min_mean_confidence:
+        reasons.append(
+            f"confidence<{args.bass_min_mean_confidence:.2f}"
+        )
+    if result.note_count < args.bass_min_notes:
+        reasons.append(f"notes<{args.bass_min_notes}")
+
+    return (len(reasons) == 0, ";".join(reasons))
+
+
 def load_mono(path: Path, sr: int = ANALYSIS_SR) -> np.ndarray:
     y, _ = librosa.load(
         path,
@@ -1651,6 +1925,8 @@ def source_bias(source_name: str) -> float:
         "instrumental_harmonic": 0.000,
         "instrumental": -0.020,
         "mix": -0.060,
+        "bass_harmonic": 0.045,
+        "bass": 0.020,
     }
     return float(biases.get(source_name, 0.0))
 
@@ -1798,16 +2074,36 @@ def process_song(
         raise RuntimeError("No complete bar windows found.")
 
     rel_parent = src.parent.relative_to(input_root)
-    song_out = output_root / "wav" / rel_parent
-    song_out.mkdir(parents=True, exist_ok=True)
 
-    total_out_dir = output_root / "total" / rel_parent
-    total_out_dir.mkdir(parents=True, exist_ok=True)
+    role_wav_dirs = {
+        "main": output_root / "wav" / "main" / rel_parent,
+        "bass": output_root / "wav" / "bass" / rel_parent,
+    }
+    role_total_dirs = {
+        "main": output_root / "total" / "main" / rel_parent,
+        "bass": output_root / "total" / "bass" / rel_parent,
+    }
+
+    for path in role_wav_dirs.values():
+        path.mkdir(parents=True, exist_ok=True)
+    if not args.no_total:
+        for path in role_total_dirs.values():
+            path.mkdir(parents=True, exist_ok=True)
 
     total_duration_s = len(mix) / ANALYSIS_SR
-    total_samples = max(1, int(math.ceil(total_duration_s * OUTPUT_SR)))
-    total_sum = np.zeros(total_samples, dtype=np.float64)
-    total_weights = np.zeros(total_samples, dtype=np.float64)
+    total_samples = max(
+        1,
+        int(math.ceil(total_duration_s * OUTPUT_SR)),
+    )
+
+    role_sums = {
+        "main": np.zeros(total_samples, dtype=np.float64),
+        "bass": np.zeros(total_samples, dtype=np.float64),
+    }
+    role_weights = {
+        "main": np.zeros(total_samples, dtype=np.float64),
+        "bass": np.zeros(total_samples, dtype=np.float64),
+    }
 
     accepted_count = 0
     rejected_count = 0
@@ -1817,14 +2113,25 @@ def process_song(
     ) as tmp:
         tmp_dir = Path(tmp)
 
-        sources: dict[str, np.ndarray] = {}
+        main_sources: list[AnalysisSource] = []
+        bass_sources: list[AnalysisSource] = []
 
         if separator is None:
             if not args.no_hpss_mix:
                 try:
-                    sources["mix_harmonic"] = hpss_harmonic(
+                    harmonic = hpss_harmonic(
                         mix,
                         margin=args.hpss_margin,
+                    )
+                    main_sources.append(
+                        AnalysisSource(
+                            name="mix_harmonic",
+                            pitch_audio=harmonic,
+                            attack_audio=mix,
+                            role="main",
+                            min_midi=args.min_midi,
+                            max_midi=args.max_midi,
+                        )
                     )
                 except Exception as exc:
                     print(
@@ -1832,44 +2139,75 @@ def process_song(
                         file=sys.stderr,
                     )
 
-            # With --no-separation, retain the raw mix as a last resort.
-            sources["mix"] = mix
+            main_sources.append(
+                AnalysisSource(
+                    name="mix",
+                    pitch_audio=mix,
+                    attack_audio=mix,
+                    role="main",
+                    min_midi=args.min_midi,
+                    max_midi=args.max_midi,
+                )
+            )
 
         else:
             stems = separator.separate(src)
 
-            # Drums and Bass are intentionally ignored.
-            # They are never sent to Basic Pitch.
             if "drums" in stems:
-                print("  [STEM] drums: discarded")
-            if "bass" in stems:
-                print("  [STEM] bass: discarded")
+                print("  [STEM] drums: preserved, not transcribed")
 
-            # Vocals are usually already close to monophonic and should not
-            # be HPSS-filtered by default, because consonants/attacks can be
-            # damaged without improving the F0 line.
             if "vocals" in stems:
                 try:
-                    sources["vocals"] = load_mono(stems["vocals"])
+                    vocals = load_mono(stems["vocals"])
+                    main_sources.append(
+                        AnalysisSource(
+                            name="vocals",
+                            pitch_audio=vocals,
+                            attack_audio=vocals,
+                            role="main",
+                            min_midi=args.min_midi,
+                            max_midi=args.max_midi,
+                        )
+                    )
                 except Exception as exc:
                     print(
                         f"  [WARN] failed to load vocals: {exc}",
                         file=sys.stderr,
                     )
 
-            # The Other stem is the main instrumental-melody candidate.
             if "other" in stems:
                 try:
                     other = load_mono(stems["other"])
 
                     if not args.no_hpss_other:
-                        sources["other_harmonic"] = hpss_harmonic(
+                        harmonic = hpss_harmonic(
                             other,
                             margin=args.hpss_margin,
                         )
+                        # Critical pairing: harmonic for pitch, RAW Other for
+                        # attack/retrigger detection.
+                        main_sources.append(
+                            AnalysisSource(
+                                name="other_harmonic",
+                                pitch_audio=harmonic,
+                                attack_audio=other,
+                                role="main",
+                                min_midi=args.min_midi,
+                                max_midi=args.max_midi,
+                            )
+                        )
 
                     if not args.no_raw_other:
-                        sources["other"] = other
+                        main_sources.append(
+                            AnalysisSource(
+                                name="other",
+                                pitch_audio=other,
+                                attack_audio=other,
+                                role="main",
+                                min_midi=args.min_midi,
+                                max_midi=args.max_midi,
+                            )
+                        )
 
                 except Exception as exc:
                     print(
@@ -1877,14 +2215,58 @@ def process_song(
                         file=sys.stderr,
                     )
 
-            # htdemucs_6s users can also expose guitar/piano independently.
+            # Dedicated BASS role. Use HPSS bass for pitch stability and raw
+            # bass for attack timing, plus raw bass as a fallback candidate.
+            if "bass" in stems:
+                try:
+                    bass = load_mono(stems["bass"])
+                    bass_harmonic = hpss_harmonic(
+                        bass,
+                        margin=args.hpss_margin,
+                    )
+
+                    bass_sources.append(
+                        AnalysisSource(
+                            name="bass_harmonic",
+                            pitch_audio=bass_harmonic,
+                            attack_audio=bass,
+                            role="bass",
+                            min_midi=args.bass_min_midi,
+                            max_midi=args.bass_max_midi,
+                        )
+                    )
+                    bass_sources.append(
+                        AnalysisSource(
+                            name="bass",
+                            pitch_audio=bass,
+                            attack_audio=bass,
+                            role="bass",
+                            min_midi=args.bass_min_midi,
+                            max_midi=args.bass_max_midi,
+                        )
+                    )
+                except Exception as exc:
+                    print(
+                        f"  [WARN] failed to prepare bass stem: {exc}",
+                        file=sys.stderr,
+                    )
+            else:
+                print("  [BASS] no bass stem available")
+
             for melodic_stem in ("guitar", "piano"):
                 if melodic_stem not in stems:
                     continue
-
                 try:
-                    sources[melodic_stem] = load_mono(
-                        stems[melodic_stem]
+                    audio = load_mono(stems[melodic_stem])
+                    main_sources.append(
+                        AnalysisSource(
+                            name=melodic_stem,
+                            pitch_audio=audio,
+                            attack_audio=audio,
+                            role="main",
+                            min_midi=args.min_midi,
+                            max_midi=args.max_midi,
+                        )
                     )
                 except Exception as exc:
                     print(
@@ -1892,32 +2274,55 @@ def process_song(
                         file=sys.stderr,
                     )
 
-            # If the user selected a 2-stem model, keep compatibility:
-            # HPSS the instrumental residual before transcription.
             if "instrumental" in stems:
                 try:
-                    instrumental = load_mono(
-                        stems["instrumental"]
-                    )
-                    sources["instrumental_harmonic"] = hpss_harmonic(
+                    instrumental = load_mono(stems["instrumental"])
+                    harmonic = hpss_harmonic(
                         instrumental,
                         margin=args.hpss_margin,
                     )
+                    main_sources.append(
+                        AnalysisSource(
+                            name="instrumental_harmonic",
+                            pitch_audio=harmonic,
+                            attack_audio=instrumental,
+                            role="main",
+                            min_midi=args.min_midi,
+                            max_midi=args.max_midi,
+                        )
+                    )
                     if not args.no_raw_other:
-                        sources["instrumental"] = instrumental
+                        main_sources.append(
+                            AnalysisSource(
+                                name="instrumental",
+                                pitch_audio=instrumental,
+                                attack_audio=instrumental,
+                                role="main",
+                                min_midi=args.min_midi,
+                                max_midi=args.max_midi,
+                            )
+                        )
                 except Exception as exc:
                     print(
                         f"  [WARN] failed to prepare instrumental stem: {exc}",
                         file=sys.stderr,
                     )
 
-            # Harmonic full-mix fallback catches lead material that leaks out
-            # of all isolated stems, but suppresses most percussive transients.
             if not args.no_hpss_mix:
                 try:
-                    sources["mix_harmonic"] = hpss_harmonic(
+                    mix_harmonic = hpss_harmonic(
                         mix,
                         margin=args.hpss_margin,
+                    )
+                    main_sources.append(
+                        AnalysisSource(
+                            name="mix_harmonic",
+                            pitch_audio=mix_harmonic,
+                            attack_audio=mix,
+                            role="main",
+                            min_midi=args.min_midi,
+                            max_midi=args.max_midi,
+                        )
                     )
                 except Exception as exc:
                     print(
@@ -1925,205 +2330,260 @@ def process_song(
                         file=sys.stderr,
                     )
 
-            # Raw mix is opt-in because percussion can create many false notes.
             if args.raw_mix_fallback:
-                sources["mix"] = mix
+                main_sources.append(
+                    AnalysisSource(
+                        name="mix",
+                        pitch_audio=mix,
+                        attack_audio=mix,
+                        role="main",
+                        min_midi=args.min_midi,
+                        max_midi=args.max_midi,
+                    )
+                )
 
-        if not sources:
+        if not main_sources:
             raise RuntimeError(
-                "No melody candidate sources could be prepared."
+                "No MAIN melody candidate sources could be prepared."
             )
 
         print(
-            "  [CANDIDATES] "
-            + ", ".join(sorted(sources.keys()))
+            "  [MAIN CANDIDATES] "
+            + ", ".join(sorted(s.name for s in main_sources))
         )
-
-        for window in windows:
-            results: list[CandidateResult] = []
-
-            for source_name, source_audio in sources.items():
-                try:
-                    result = analyze_candidate(
-                        source_name=source_name,
-                        source_audio=source_audio,
-                        sr=ANALYSIS_SR,
-                        window=window,
-                        transcriber=transcriber,
-                        fps=args.viterbi_fps,
-                        bridge_gap_ms=args.bridge_gap_ms,
-                        min_output_note_ms=args.min_output_note_ms,
-                        retrigger_min_ms=args.retrigger_min_ms,
-                        retrigger_pitch_tolerance=args.retrigger_pitch_tolerance,
-                        raw_active_threshold=args.raw_active_threshold,
-                        raw_retrigger_threshold=args.raw_retrigger_threshold,
-                        waveform_onset_weight=args.waveform_onset_weight,
-                        tmp_dir=tmp_dir,
-                    )
-                    results.append(result)
-                except Exception as exc:
-                    print(
-                        f"  [WARN] segment "
-                        f"{window['segment_index']:04d} "
-                        f"{source_name}: {exc}",
-                        file=sys.stderr,
-                    )
-
-            if not results:
-                rejected_count += 1
-                rejected_writer.writerow(
-                    {
-                        "source_file": str(src.relative_to(input_root)),
-                        "segment_index": window["segment_index"],
-                        "start_bar": window["start_bar"],
-                        "end_bar": window["end_bar"],
-                        "start_s": f"{window['center_start']:.6f}",
-                        "end_s": f"{window['center_end']:.6f}",
-                        "reason": "no_candidate",
-                        "best_source": "",
-                        "score": "0",
-                        "ranking_score": "0",
-                        "source_bias": "0",
-                        "voiced_ratio": "0",
-                        "mean_confidence": "0",
-                        "note_count": "0",
-                    }
-                )
-                continue
-
-            best = max(results, key=lambda r: r.score)
-            ok, reason = accepted(best, args)
-
-            segment_name = (
-                f"{src.stem}"
-                f"_b{window['start_bar']:04d}"
-                f"-{window['end_bar']:04d}"
+        if bass_sources:
+            print(
+                "  [BASS CANDIDATES] "
+                + ", ".join(sorted(s.name for s in bass_sources))
             )
 
-            if not ok:
-                rejected_count += 1
-                rejected_writer.writerow(
+        role_sources = {
+            "main": main_sources,
+            "bass": bass_sources,
+        }
+
+        for window in windows:
+            for role in ("main", "bass"):
+                candidates = role_sources[role]
+
+                if not candidates:
+                    continue
+
+                results: list[CandidateResult] = []
+
+                for source in candidates:
+                    try:
+                        result = analyze_candidate(
+                            source_name=source.name,
+                            source_audio=source.pitch_audio,
+                            attack_audio=source.attack_audio,
+                            sr=ANALYSIS_SR,
+                            window=window,
+                            transcriber=transcriber,
+                            fps=args.viterbi_fps,
+                            bridge_gap_ms=args.bridge_gap_ms,
+                            min_output_note_ms=args.min_output_note_ms,
+                            retrigger_min_ms=args.retrigger_min_ms,
+                            retrigger_pitch_tolerance=args.retrigger_pitch_tolerance,
+                            raw_active_threshold=args.raw_active_threshold,
+                            raw_retrigger_threshold=args.raw_retrigger_threshold,
+                            attack_onset_weight=args.attack_onset_weight,
+                            tempo_bpm=tempo,
+                            tempo_retrigger_fraction=args.tempo_retrigger_fraction,
+                            retrigger_split_penalty=args.retrigger_split_penalty,
+                            decode_min_midi=source.min_midi,
+                            decode_max_midi=source.max_midi,
+                            decoder_passes=args.decoder_passes,
+                            decoder_extra_context_ms=args.decoder_extra_context_ms,
+                            tmp_dir=tmp_dir,
+                        )
+                        results.append(result)
+                    except Exception as exc:
+                        print(
+                            f"  [WARN] {role} segment "
+                            f"{window['segment_index']:04d} "
+                            f"{source.name}: {exc}",
+                            file=sys.stderr,
+                        )
+
+                if not results:
+                    rejected_count += 1
+                    rejected_writer.writerow(
+                        {
+                            "role": role,
+                            "source_file": str(src.relative_to(input_root)),
+                            "segment_index": window["segment_index"],
+                            "start_bar": window["start_bar"],
+                            "end_bar": window["end_bar"],
+                            "start_s": f"{window['center_start']:.6f}",
+                            "end_s": f"{window['center_end']:.6f}",
+                            "reason": "no_candidate",
+                            "best_source": "",
+                            "score": "0",
+                            "ranking_score": "0",
+                            "source_bias": "0",
+                            "voiced_ratio": "0",
+                            "mean_confidence": "0",
+                            "note_count": "0",
+                        }
+                    )
+                    continue
+
+                best = max(results, key=lambda r: r.score)
+                ok, reason = accepted_for_role(
+                    best,
+                    args,
+                    role,
+                )
+
+                segment_name = (
+                    f"{src.stem}"
+                    f"_b{window['start_bar']:04d}"
+                    f"-{window['end_bar']:04d}"
+                    f"_{role}"
+                )
+
+                if not ok:
+                    rejected_count += 1
+                    rejected_writer.writerow(
+                        {
+                            "role": role,
+                            "source_file": str(src.relative_to(input_root)),
+                            "segment_index": window["segment_index"],
+                            "start_bar": window["start_bar"],
+                            "end_bar": window["end_bar"],
+                            "start_s": f"{window['center_start']:.6f}",
+                            "end_s": f"{window['center_end']:.6f}",
+                            "reason": reason,
+                            "best_source": best.source_name,
+                            "score": f"{best.raw_score:.6f}",
+                            "ranking_score": f"{best.score:.6f}",
+                            "source_bias": f"{best.source_bias:.6f}",
+                            "voiced_ratio": f"{best.voiced_ratio:.6f}",
+                            "mean_confidence": f"{best.mean_confidence:.6f}",
+                            "note_count": best.note_count,
+                        }
+                    )
+                    continue
+
+                duration_s = (
+                    window["center_end"] - window["center_start"]
+                )
+                melody = synthesize_notes(
+                    best.notes,
+                    duration_s=duration_s,
+                    sr=OUTPUT_SR,
+                )
+
+                wav_path = (
+                    role_wav_dirs[role]
+                    / f"{segment_name}.wav"
+                )
+
+                sf.write(
+                    wav_path,
+                    melody,
+                    OUTPUT_SR,
+                    subtype="PCM_16",
+                )
+
+                if not args.no_total:
+                    add_segment_to_timeline(
+                        mix_sum=role_sums[role],
+                        weight_sum=role_weights[role],
+                        segment=melody,
+                        start_s=window["center_start"],
+                        sr=OUTPUT_SR,
+                    )
+
+                if args.keep_events:
+                    write_events_json(
+                        wav_path.with_suffix(".json"),
+                        source_file=str(
+                            src.relative_to(input_root)
+                        ),
+                        source_kind=best.source_name,
+                        window=window,
+                        result=best,
+                    )
+
+                accepted_count += 1
+
+                metadata_writer.writerow(
                     {
-                        "source_file": str(src.relative_to(input_root)),
+                        "role": role,
+                        "file": str(
+                            wav_path.relative_to(output_root)
+                        ),
+                        "source_file": str(
+                            src.relative_to(input_root)
+                        ),
                         "segment_index": window["segment_index"],
                         "start_bar": window["start_bar"],
                         "end_bar": window["end_bar"],
                         "start_s": f"{window['center_start']:.6f}",
                         "end_s": f"{window['center_end']:.6f}",
-                        "reason": reason,
-                        "best_source": best.source_name,
+                        "duration_s": f"{duration_s:.6f}",
+                        "tempo_bpm": f"{tempo:.3f}",
+                        "bar_phase": phase,
+                        "source_kind": best.source_name,
                         "score": f"{best.raw_score:.6f}",
                         "ranking_score": f"{best.score:.6f}",
                         "source_bias": f"{best.source_bias:.6f}",
                         "voiced_ratio": f"{best.voiced_ratio:.6f}",
                         "mean_confidence": f"{best.mean_confidence:.6f}",
+                        "large_jump_ratio": f"{best.large_jump_ratio:.6f}",
+                        "octave_jump_ratio": f"{best.octave_jump_ratio:.6f}",
                         "note_count": best.note_count,
                     }
                 )
+
+                print(
+                    f"  [OK:{role.upper()}] {segment_name} "
+                    f"| {best.source_name} "
+                    f"| score={best.raw_score:.3f} "
+                    f"| rank={best.score:.3f} "
+                    f"| notes={best.note_count}"
+                )
+
+    if not args.no_total:
+        for role in ("main", "bass"):
+            if role == "bass" and not bass_sources:
                 continue
 
-            duration_s = (
-                window["center_end"]
-                - window["center_start"]
+            total_audio = finalize_total_timeline(
+                role_sums[role],
+                role_weights[role],
             )
 
-            melody = synthesize_notes(
-                best.notes,
-                duration_s=duration_s,
-                sr=OUTPUT_SR,
+            total_path = (
+                role_total_dirs[role]
+                / f"{src.stem}_{role}_total.wav"
             )
-
-            wav_path = song_out / f"{segment_name}.wav"
 
             sf.write(
-                wav_path,
-                melody,
+                total_path,
+                total_audio,
                 OUTPUT_SR,
                 subtype="PCM_16",
             )
 
-            if not args.no_total:
-                add_segment_to_timeline(
-                    mix_sum=total_sum,
-                    weight_sum=total_weights,
-                    segment=melody,
-                    start_s=window["center_start"],
-                    sr=OUTPUT_SR,
-                )
-
-            if args.keep_events:
-                write_events_json(
-                    wav_path.with_suffix(".json"),
-                    source_file=str(
-                        src.relative_to(input_root)
-                    ),
-                    source_kind=best.source_name,
-                    window=window,
-                    result=best,
-                )
-
-            accepted_count += 1
-
-            metadata_writer.writerow(
-                {
-                    "file": str(
-                        wav_path.relative_to(output_root)
-                    ),
-                    "source_file": str(
-                        src.relative_to(input_root)
-                    ),
-                    "segment_index": window["segment_index"],
-                    "start_bar": window["start_bar"],
-                    "end_bar": window["end_bar"],
-                    "start_s": f"{window['center_start']:.6f}",
-                    "end_s": f"{window['center_end']:.6f}",
-                    "duration_s": f"{duration_s:.6f}",
-                    "tempo_bpm": f"{tempo:.3f}",
-                    "bar_phase": phase,
-                    "source_kind": best.source_name,
-                    "score": f"{best.raw_score:.6f}",
-                    "ranking_score": f"{best.score:.6f}",
-                    "source_bias": f"{best.source_bias:.6f}",
-                    "voiced_ratio": f"{best.voiced_ratio:.6f}",
-                    "mean_confidence": f"{best.mean_confidence:.6f}",
-                    "large_jump_ratio": f"{best.large_jump_ratio:.6f}",
-                    "octave_jump_ratio": f"{best.octave_jump_ratio:.6f}",
-                    "note_count": best.note_count,
-                }
+            covered_samples = int(
+                np.count_nonzero(role_weights[role] > 1e-10)
+            )
+            coverage = (
+                covered_samples
+                / max(1, len(role_weights[role]))
             )
 
             print(
-                f"  [OK] {segment_name} "
-                f"| {best.source_name} "
-                f"| score={best.raw_score:.3f} "
-                f"| rank={best.score:.3f} "
-                f"| notes={best.note_count}"
+                f"  [TOTAL:{role.upper()}] "
+                f"{total_path.relative_to(output_root)} "
+                f"| coverage={coverage:.1%}"
             )
 
-    if not args.no_total:
-        total_audio = finalize_total_timeline(
-            total_sum,
-            total_weights,
-        )
-
-        total_path = total_out_dir / f"{src.stem}_total.wav"
-
-        sf.write(
-            total_path,
-            total_audio,
-            OUTPUT_SR,
-            subtype="PCM_16",
-        )
-
-        covered_samples = int(np.count_nonzero(total_weights > 1e-10))
-        coverage = covered_samples / max(1, len(total_weights))
-
-        print(
-            f"  [TOTAL] {total_path.relative_to(output_root)} "
-            f"| coverage={coverage:.1%}"
-        )
-
     return accepted_count, rejected_count
+
 
 
 def main() -> int:
@@ -2158,8 +2618,16 @@ def main() -> int:
         raise SystemExit("--raw-active-threshold must be 0..1")
     if not 0.0 <= args.raw_retrigger_threshold <= 1.0:
         raise SystemExit("--raw-retrigger-threshold must be 0..1")
-    if not 0.0 <= args.waveform_onset_weight <= 0.40:
-        raise SystemExit("--waveform-onset-weight must be 0..0.40")
+    if not 0.0 <= args.attack_onset_weight <= 0.40:
+        raise SystemExit("--attack-onset-weight must be 0..0.40")
+    if args.tempo_retrigger_fraction < 0.0:
+        raise SystemExit("--tempo-retrigger-fraction must be >= 0")
+    if args.retrigger_split_penalty < 0.0:
+        raise SystemExit("--retrigger-split-penalty must be >= 0")
+    if args.decoder_extra_context_ms < 0.0:
+        raise SystemExit("--decoder-extra-context-ms must be >= 0")
+    if not 0 <= args.bass_min_midi <= args.bass_max_midi <= 127:
+        raise SystemExit("bass MIDI range must satisfy 0 <= min <= max <= 127")
 
     files = find_mp3s(
         input_root,
@@ -2174,15 +2642,16 @@ def main() -> int:
         return 1
 
     output_root.mkdir(parents=True, exist_ok=True)
-    (output_root / "wav").mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-    if not args.no_total:
-        (output_root / "total").mkdir(
+    for role in ("main", "bass"):
+        (output_root / "wav" / role).mkdir(
             parents=True,
             exist_ok=True,
         )
+        if not args.no_total:
+            (output_root / "total" / role).mkdir(
+                parents=True,
+                exist_ok=True,
+            )
 
     separator = None
 
@@ -2198,14 +2667,15 @@ def main() -> int:
         onset_threshold=args.onset_threshold,
         frame_threshold=args.frame_threshold,
         minimum_note_ms=args.minimum_note_ms,
-        min_midi=args.min_midi,
-        max_midi=args.max_midi,
+        min_midi=min(args.min_midi, args.bass_min_midi),
+        max_midi=max(args.max_midi, args.bass_max_midi),
     )
 
     metadata_path = output_root / "metadata.csv"
     rejected_path = output_root / "rejected.csv"
 
     metadata_fields = [
+        "role",
         "file",
         "source_file",
         "segment_index",
@@ -2228,6 +2698,7 @@ def main() -> int:
     ]
 
     rejected_fields = [
+        "role",
         "source_file",
         "segment_index",
         "start_bar",
@@ -2311,7 +2782,8 @@ def main() -> int:
     print(f"Metadata : {metadata_path}")
     print(f"Rejected : {rejected_path}")
     if not args.no_total:
-        print(f"Total WAV: {output_root / 'total'}")
+        print(f"Total MAIN: {output_root / 'total' / 'main'}")
+        print(f"Total BASS: {output_root / 'total' / 'bass'}")
     if not args.no_separation:
         print(f"Stems    : {output_root / '_stems'}")
 
