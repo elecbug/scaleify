@@ -11,10 +11,12 @@ Design
 4. Apply HPSS to Other (and optionally Mix) to suppress residual percussion.
 5. Analyze short bar-aligned windows, not the whole song as one melody.
 6. Transcribe each candidate source with Spotify Basic Pitch.
-7. Collapse polyphonic note candidates into one melody line using a
-   continuity-aware Viterbi path.
-8. Preserve same-pitch re-attacks using Basic Pitch onset boundaries.
-9. Keep only high-confidence segments.
+7. Decode Basic Pitch RAW note/onset/contour activations directly at native
+   model-frame resolution.
+8. Fuse neural onset, inferred frame-rise onset, and waveform onset evidence.
+9. Collapse polyphonic activations into one melody line with Viterbi.
+10. Preserve same-pitch re-attacks from the fused onset posterior.
+11. Keep only high-confidence segments.
 10. Resynthesize each accepted segment as a clean monophonic WAV.
 11. Reassemble accepted segments on the original song timeline into a
     per-song total WAV.
@@ -41,6 +43,9 @@ Notes:
 - Drums and Bass are never sent to Basic Pitch.
 - Other is additionally processed by librosa HPSS by default.
 - Basic Pitch may use TensorFlow / TFLite / ONNX depending on installation.
+- The primary decoder uses raw model outputs (note/onset/contour), not decoded
+  Basic Pitch note-events. Event decoding remains only as a compatibility
+  fallback if raw outputs are unavailable.
 - If source separation is unavailable, use --no-separation.
 - Separated stems are preserved under <output>/_stems/.
 - Reassembled per-song outputs are written under <output>/total/.
@@ -97,6 +102,12 @@ class CandidateResult:
     large_jump_ratio: float
     octave_jump_ratio: float
     note_count: int
+
+
+@dataclass
+class BasicPitchPrediction:
+    model_output: dict[str, np.ndarray]
+    note_events: list[tuple]
 
 
 def parse_args() -> argparse.Namespace:
@@ -187,6 +198,33 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Allow an onset to retrigger the Viterbi note when its Basic Pitch "
             "pitch differs by at most this many semitones. Default: 0."
+        ),
+    )
+    p.add_argument(
+        "--raw-active-threshold",
+        type=float,
+        default=0.12,
+        help=(
+            "Minimum raw Basic Pitch note salience considered by Viterbi. "
+            "Default: 0.12."
+        ),
+    )
+    p.add_argument(
+        "--raw-retrigger-threshold",
+        type=float,
+        default=0.30,
+        help=(
+            "Threshold for fused raw onset evidence when splitting repeated "
+            "same-pitch notes. Default: 0.30."
+        ),
+    )
+    p.add_argument(
+        "--waveform-onset-weight",
+        type=float,
+        default=0.15,
+        help=(
+            "Weight of waveform spectral-onset evidence in the fused retrigger "
+            "score. It is gated by neural evidence. Default: 0.15."
         ),
     )
 
@@ -453,16 +491,18 @@ class BasicPitchTranscriber:
         self.onset_threshold = onset_threshold
         self.frame_threshold = frame_threshold
         self.minimum_note_ms = minimum_note_ms
+        self.min_midi = int(min_midi)
+        self.max_midi = int(max_midi)
         self.min_hz = midi_to_hz(min_midi)
         self.max_hz = midi_to_hz(max_midi)
 
         # Load once; do not reload the neural network for every segment.
         self.model = Model(ICASSP_2022_MODEL_PATH)
 
-    def predict(self, wav_path: Path) -> list[tuple]:
+    def predict(self, wav_path: Path) -> BasicPitchPrediction:
         from basic_pitch.inference import predict
 
-        _, _, events = predict(
+        model_output, _, events = predict(
             str(wav_path),
             self.model,
             onset_threshold=self.onset_threshold,
@@ -474,7 +514,18 @@ class BasicPitchTranscriber:
             melodia_trick=True,
         )
 
-        return list(events)
+        normalized: dict[str, np.ndarray] = {}
+        if isinstance(model_output, dict):
+            for key, value in model_output.items():
+                try:
+                    normalized[str(key)] = np.asarray(value, dtype=np.float32)
+                except Exception:
+                    pass
+
+        return BasicPitchPrediction(
+            model_output=normalized,
+            note_events=list(events),
+        )
 
 
 def crop_audio(
@@ -490,6 +541,345 @@ def crop_audio(
         return np.zeros(1, dtype=np.float32)
 
     return np.asarray(audio[start:end], dtype=np.float32)
+
+
+
+BASIC_PITCH_MIDI_OFFSET = 21
+BASIC_PITCH_NOTE_BINS = 88
+BASIC_PITCH_CONTOUR_BINS_PER_SEMITONE = 3
+
+
+def _time_frequency_matrix(
+    value: np.ndarray,
+    expected_bins: int,
+) -> np.ndarray | None:
+    """
+    Normalize a Basic Pitch posteriorgram to shape (time, frequency).
+
+    Different runtimes may retain singleton batch/channel axes, so squeeze
+    them and transpose when the expected frequency-bin count is on axis 0.
+    """
+    arr = np.asarray(value, dtype=np.float32)
+    arr = np.squeeze(arr)
+
+    if arr.ndim != 2:
+        return None
+
+    if arr.shape[1] == expected_bins:
+        return arr
+
+    if arr.shape[0] == expected_bins:
+        return arr.T
+
+    return None
+
+
+def infer_frame_rise_onsets(
+    note_roll: np.ndarray,
+    onset_roll: np.ndarray,
+    n_diff: int = 2,
+) -> np.ndarray:
+    """
+    Infer onsets from upward changes in note activation.
+
+    This mirrors Basic Pitch's own decoder idea: compare several preceding
+    frame differences, keep positive rises, and rescale them to the predicted
+    onset posterior's amplitude range.
+    """
+    if len(note_roll) == 0:
+        return np.zeros_like(note_roll)
+
+    diffs = []
+
+    for n in range(1, n_diff + 1):
+        shifted = np.zeros_like(note_roll)
+        shifted[n:] = note_roll[:-n]
+        diffs.append(note_roll - shifted)
+
+    frame_diff = np.min(
+        np.stack(diffs, axis=0),
+        axis=0,
+    )
+
+    frame_diff = np.maximum(frame_diff, 0.0)
+    frame_diff[:n_diff] = 0.0
+
+    diff_max = float(np.max(frame_diff))
+    onset_max = float(np.max(onset_roll))
+
+    if diff_max > 1e-12 and onset_max > 1e-12:
+        frame_diff *= onset_max / diff_max
+
+    return np.asarray(frame_diff, dtype=np.float32)
+
+
+def waveform_onset_curve(
+    audio: np.ndarray,
+    sr: int,
+    n_frames: int,
+) -> np.ndarray:
+    """
+    Compute a pitch-agnostic spectral onset curve and interpolate it onto the
+    Basic Pitch raw model-frame timeline.
+    """
+    if n_frames <= 0:
+        return np.zeros(0, dtype=np.float32)
+
+    onset_env = librosa.onset.onset_strength(
+        y=np.asarray(audio, dtype=np.float32),
+        sr=sr,
+        hop_length=256,
+    ).astype(np.float32)
+
+    if len(onset_env) == 0:
+        return np.zeros(n_frames, dtype=np.float32)
+
+    positive = onset_env[onset_env > 0]
+    scale = (
+        float(np.percentile(positive, 95))
+        if len(positive)
+        else float(np.max(onset_env))
+    )
+
+    if scale > 1e-12:
+        onset_env = np.clip(onset_env / scale, 0.0, 1.0)
+    else:
+        onset_env[:] = 0.0
+
+    if len(onset_env) == 1:
+        return np.full(
+            n_frames,
+            float(onset_env[0]),
+            dtype=np.float32,
+        )
+
+    source_x = np.linspace(
+        0.0,
+        1.0,
+        len(onset_env),
+        dtype=np.float64,
+    )
+    target_x = np.linspace(
+        0.0,
+        1.0,
+        n_frames,
+        dtype=np.float64,
+    )
+
+    return np.interp(
+        target_x,
+        source_x,
+        onset_env,
+    ).astype(np.float32)
+
+
+def raw_basic_pitch_decoder_inputs(
+    prediction: BasicPitchPrediction,
+    context_audio: np.ndarray,
+    sr: int,
+    min_midi: int,
+    max_midi: int,
+    waveform_weight: float,
+) -> tuple[np.ndarray, np.ndarray, float] | None:
+    """
+    Convert Basic Pitch raw model outputs into:
+      - 128 x T melodic salience grid
+      - 128 x T fused onset/retrigger grid
+      - native effective frames/second
+
+    Note output has 88 piano-key bins (MIDI 21..108).
+    Contour output has three sub-bins per semitone and is reduced to a
+    semitone-level confidence via max pooling.
+    """
+    model_output = prediction.model_output
+
+    if "note" not in model_output or "onset" not in model_output:
+        return None
+
+    notes = _time_frequency_matrix(
+        model_output["note"],
+        BASIC_PITCH_NOTE_BINS,
+    )
+    onsets = _time_frequency_matrix(
+        model_output["onset"],
+        BASIC_PITCH_NOTE_BINS,
+    )
+
+    if notes is None or onsets is None:
+        return None
+
+    t_count = min(len(notes), len(onsets))
+    if t_count < 2:
+        return None
+
+    notes = np.clip(notes[:t_count], 0.0, 1.0)
+    onsets = np.clip(onsets[:t_count], 0.0, 1.0)
+
+    contour_semis = np.zeros_like(notes)
+
+    contour = model_output.get("contour")
+    if contour is not None:
+        contour_matrix = _time_frequency_matrix(
+            contour,
+            BASIC_PITCH_NOTE_BINS
+            * BASIC_PITCH_CONTOUR_BINS_PER_SEMITONE,
+        )
+
+        if contour_matrix is not None and len(contour_matrix) >= t_count:
+            contour_matrix = np.clip(
+                contour_matrix[:t_count],
+                0.0,
+                1.0,
+            )
+            contour_semis = np.max(
+                contour_matrix.reshape(
+                    t_count,
+                    BASIC_PITCH_NOTE_BINS,
+                    BASIC_PITCH_CONTOUR_BINS_PER_SEMITONE,
+                ),
+                axis=2,
+            )
+
+    # Melodic pitch salience: the note head remains dominant, while contour
+    # helps retain a stable melodic path through weaker note activations.
+    salience_88 = np.clip(
+        0.82 * notes
+        + 0.18 * contour_semis
+        + 0.04 * onsets,
+        0.0,
+        1.0,
+    )
+
+    frame_rise = infer_frame_rise_onsets(
+        note_roll=notes,
+        onset_roll=onsets,
+        n_diff=2,
+    )
+
+    waveform = waveform_onset_curve(
+        context_audio,
+        sr,
+        t_count,
+    )
+
+    # Global waveform attacks are useful for repeated synth notes, but drum
+    # residuals must not split notes by themselves. Gate the waveform term by
+    # neural onset/rise support for each pitch.
+    neural_support = np.maximum(onsets, frame_rise)
+    waveform_gate = np.clip(
+        neural_support / 0.22,
+        0.0,
+        1.0,
+    )
+
+    w_wave = float(np.clip(waveform_weight, 0.0, 0.40))
+    w_onset = 0.60
+    w_rise = max(0.0, 1.0 - w_onset - w_wave)
+
+    fused_onset_88 = np.clip(
+        w_onset * onsets
+        + w_rise * frame_rise
+        + w_wave * waveform[:, None] * waveform_gate,
+        0.0,
+        1.0,
+    )
+
+    salience = np.zeros((128, t_count), dtype=np.float32)
+    fused_onset = np.zeros((128, t_count), dtype=np.float32)
+
+    for idx in range(BASIC_PITCH_NOTE_BINS):
+        midi = BASIC_PITCH_MIDI_OFFSET + idx
+
+        if midi < min_midi or midi > max_midi:
+            continue
+
+        salience[midi] = salience_88[:, idx]
+        fused_onset[midi] = fused_onset_88[:, idx]
+
+    duration_s = len(context_audio) / max(sr, 1)
+    fps = (
+        float(t_count) / duration_s
+        if duration_s > 1e-9
+        else 0.0
+    )
+
+    if fps <= 0:
+        return None
+
+    return salience, fused_onset, fps
+
+
+def retrigger_boundaries_from_raw(
+    path: np.ndarray,
+    onset_score: np.ndarray,
+    fps: float,
+    threshold: float,
+    min_spacing_ms: float,
+    min_note_ms: float,
+    pitch_tolerance: int,
+) -> np.ndarray:
+    """
+    Split same-pitch Viterbi runs at strong local onset maxima.
+
+    Re-trigger decisions are made after short-gap bridging, so a repeated note
+    remains separable even when the pitch path itself is continuous.
+    """
+    n = len(path)
+    boundaries = np.zeros(n, dtype=bool)
+
+    if n < 3:
+        return boundaries
+
+    min_spacing_frames = max(
+        1,
+        int(round(min_spacing_ms / 1000.0 * fps)),
+    )
+    min_note_frames = max(
+        1,
+        int(round(min_note_ms / 1000.0 * fps)),
+    )
+
+    last_split_or_change = 0
+
+    for t in range(1, n - 1):
+        state = int(path[t])
+
+        if state == REST_STATE:
+            last_split_or_change = t
+            continue
+
+        if int(path[t - 1]) != state:
+            last_split_or_change = t
+            continue
+
+        lo = max(0, state - pitch_tolerance)
+        hi = min(127, state + pitch_tolerance)
+
+        center = float(np.max(onset_score[lo:hi + 1, t]))
+        if center < threshold:
+            continue
+
+        left = float(np.max(onset_score[lo:hi + 1, t - 1]))
+        right = float(np.max(onset_score[lo:hi + 1, t + 1]))
+
+        # Local-maximum requirement prevents a broad onset plateau from
+        # producing several artificial repeated notes.
+        if center < left or center < right:
+            continue
+
+        if t - last_split_or_change < min_note_frames:
+            continue
+
+        existing = np.flatnonzero(boundaries[:t])
+        last_boundary = int(existing[-1]) if len(existing) else -10**9
+
+        if t - last_boundary < min_spacing_frames:
+            continue
+
+        boundaries[t] = True
+        last_split_or_change = t
+
+    return boundaries
 
 
 def note_events_to_confidence_grid(
@@ -944,6 +1334,9 @@ def analyze_candidate(
     min_output_note_ms: float,
     retrigger_min_ms: float,
     retrigger_pitch_tolerance: int,
+    raw_active_threshold: float,
+    raw_retrigger_threshold: float,
+    waveform_onset_weight: float,
     tmp_dir: Path,
 ) -> CandidateResult:
     context_start = window["context_start"]
@@ -983,47 +1376,85 @@ def analyze_candidate(
         subtype="PCM_16",
     )
 
-    events = transcriber.predict(context_wav)
+    prediction = transcriber.predict(context_wav)
 
     duration_s = len(context) / sr
 
-    grid = note_events_to_confidence_grid(
-        events,
-        duration_s=duration_s,
-        fps=fps,
+    raw_inputs = raw_basic_pitch_decoder_inputs(
+        prediction=prediction,
+        context_audio=context,
+        sr=sr,
+        min_midi=transcriber.min_midi,
+        max_midi=transcriber.max_midi,
+        waveform_weight=waveform_onset_weight,
     )
 
-    onset_grid = note_events_to_onset_grid(
-        events,
-        duration_s=duration_s,
-        fps=fps,
-    )
+    if raw_inputs is not None:
+        grid, fused_onset, decoder_fps = raw_inputs
 
-    path, frame_conf = viterbi_monophonic_path(grid)
+        path, frame_conf = viterbi_monophonic_path(
+            grid,
+            active_threshold=raw_active_threshold,
+        )
 
-    # First derive repeated-note boundaries from Basic Pitch onsets while the
-    # Viterbi state is still intact.
-    retrigger_boundaries = retrigger_boundaries_from_onsets(
-        path=path,
-        onset_grid=onset_grid,
-        fps=fps,
-        min_spacing_ms=retrigger_min_ms,
-        pitch_tolerance=retrigger_pitch_tolerance,
-    )
+        bridge_frames = max(
+            0,
+            int(round(bridge_gap_ms / 1000.0 * decoder_fps)),
+        )
 
-    bridge_frames = max(
-        0,
-        int(round(bridge_gap_ms / 1000.0 * fps)),
-    )
+        path = bridge_short_gaps(
+            path,
+            max_gap_frames=bridge_frames,
+        )
 
-    path = bridge_short_gaps(
-        path,
-        max_gap_frames=bridge_frames,
-        protected_boundaries=retrigger_boundaries,
-    )
+        retrigger_boundaries = retrigger_boundaries_from_raw(
+            path=path,
+            onset_score=fused_onset,
+            fps=decoder_fps,
+            threshold=raw_retrigger_threshold,
+            min_spacing_ms=retrigger_min_ms,
+            min_note_ms=min_output_note_ms,
+            pitch_tolerance=retrigger_pitch_tolerance,
+        )
 
-    # Bridging may fill rests but must not erase the already-detected
-    # same-pitch attack boundaries.
+        fps = decoder_fps
+
+    else:
+        # Compatibility fallback for Basic Pitch runtimes that do not expose
+        # raw note/onset posteriorgrams in a usable shape.
+        events = prediction.note_events
+
+        grid = note_events_to_confidence_grid(
+            events,
+            duration_s=duration_s,
+            fps=fps,
+        )
+
+        onset_grid = note_events_to_onset_grid(
+            events,
+            duration_s=duration_s,
+            fps=fps,
+        )
+
+        path, frame_conf = viterbi_monophonic_path(grid)
+
+        bridge_frames = max(
+            0,
+            int(round(bridge_gap_ms / 1000.0 * fps)),
+        )
+
+        path = bridge_short_gaps(
+            path,
+            max_gap_frames=bridge_frames,
+        )
+
+        retrigger_boundaries = retrigger_boundaries_from_onsets(
+            path=path,
+            onset_grid=onset_grid,
+            fps=fps,
+            min_spacing_ms=retrigger_min_ms,
+            pitch_tolerance=retrigger_pitch_tolerance,
+        )
 
     # Rebuild confidence after bridging.
     for t, state in enumerate(path):
@@ -1524,6 +1955,9 @@ def process_song(
                         min_output_note_ms=args.min_output_note_ms,
                         retrigger_min_ms=args.retrigger_min_ms,
                         retrigger_pitch_tolerance=args.retrigger_pitch_tolerance,
+                        raw_active_threshold=args.raw_active_threshold,
+                        raw_retrigger_threshold=args.raw_retrigger_threshold,
+                        waveform_onset_weight=args.waveform_onset_weight,
                         tmp_dir=tmp_dir,
                     )
                     results.append(result)
@@ -1720,6 +2154,12 @@ def main() -> int:
         raise SystemExit("--retrigger-min-ms must be >= 0")
     if args.retrigger_pitch_tolerance < 0:
         raise SystemExit("--retrigger-pitch-tolerance must be >= 0")
+    if not 0.0 <= args.raw_active_threshold <= 1.0:
+        raise SystemExit("--raw-active-threshold must be 0..1")
+    if not 0.0 <= args.raw_retrigger_threshold <= 1.0:
+        raise SystemExit("--raw-retrigger-threshold must be 0..1")
+    if not 0.0 <= args.waveform_onset_weight <= 0.40:
+        raise SystemExit("--waveform-onset-weight must be 0..0.40")
 
     files = find_mp3s(
         input_root,
