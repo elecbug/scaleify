@@ -15,7 +15,10 @@ Design
    continuity-aware Viterbi path.
 8. Keep only high-confidence segments.
 9. Resynthesize each accepted segment as a clean monophonic WAV.
-10. Write metadata.csv and rejected.csv.
+10. Reassemble accepted segments on the original song timeline into a
+    per-song total WAV.
+11. Preserve source-separation stems for inspection/reuse.
+12. Write metadata.csv and rejected.csv.
 
 Default segmentation:
     4 beats/bar
@@ -38,6 +41,8 @@ Notes:
 - Other is additionally processed by librosa HPSS by default.
 - Basic Pitch may use TensorFlow / TFLite / ONNX depending on installation.
 - If source separation is unavailable, use --no-separation.
+- Separated stems are preserved under <output>/_stems/.
+- Reassembled per-song outputs are written under <output>/total/.
 """
 
 from __future__ import annotations
@@ -54,7 +59,6 @@ import argparse
 import csv
 import json
 import math
-import shutil
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -176,6 +180,14 @@ def parse_args() -> argparse.Namespace:
         "--keep-events",
         action="store_true",
         help="Write a JSON note-event file beside every accepted WAV.",
+    )
+    p.add_argument(
+        "--no-total",
+        action="store_true",
+        help=(
+            "Do not rebuild accepted segments into a per-song total WAV. "
+            "By default, a total WAV is written under <output>/total/."
+        ),
     )
 
     return p.parse_args()
@@ -1101,6 +1113,73 @@ def write_events_json(
     )
 
 
+
+def add_segment_to_timeline(
+    mix_sum: np.ndarray,
+    weight_sum: np.ndarray,
+    segment: np.ndarray,
+    start_s: float,
+    sr: int,
+    fade_ms: float = 8.0,
+) -> None:
+    """
+    Overlap-add one synthesized segment onto the original song timeline.
+
+    If segments overlap, accumulated weights are used later to average them
+    instead of increasing loudness at the overlap.
+    """
+    if len(segment) == 0:
+        return
+
+    start_i = max(0, int(round(start_s * sr)))
+    if start_i >= len(mix_sum):
+        return
+
+    end_i = min(len(mix_sum), start_i + len(segment))
+    n = end_i - start_i
+    if n <= 0:
+        return
+
+    x = np.asarray(segment[:n], dtype=np.float64)
+    weights = np.ones(n, dtype=np.float64)
+
+    fade = min(
+        n // 2,
+        max(0, int(round(fade_ms / 1000.0 * sr))),
+    )
+
+    if fade > 1:
+        phase = np.linspace(0.0, np.pi / 2.0, fade)
+        ramp = np.sin(phase) ** 2
+        weights[:fade] = ramp
+        weights[-fade:] = ramp[::-1]
+
+    mix_sum[start_i:end_i] += x * weights
+    weight_sum[start_i:end_i] += weights
+
+
+def finalize_total_timeline(
+    mix_sum: np.ndarray,
+    weight_sum: np.ndarray,
+    peak: float = 0.86,
+) -> np.ndarray:
+    """
+    Convert overlap sums into one monophonic total WAV.
+
+    Rejected/uncovered time ranges remain silent.
+    """
+    out = np.zeros_like(mix_sum, dtype=np.float64)
+
+    covered = weight_sum > 1e-10
+    out[covered] = mix_sum[covered] / weight_sum[covered]
+
+    current_peak = float(np.max(np.abs(out))) if len(out) else 0.0
+    if current_peak > 0:
+        out *= float(peak) / current_peak
+
+    return out.astype(np.float32)
+
+
 def process_song(
     src: Path,
     input_root: Path,
@@ -1134,6 +1213,14 @@ def process_song(
     rel_parent = src.parent.relative_to(input_root)
     song_out = output_root / "wav" / rel_parent
     song_out.mkdir(parents=True, exist_ok=True)
+
+    total_out_dir = output_root / "total" / rel_parent
+    total_out_dir.mkdir(parents=True, exist_ok=True)
+
+    total_duration_s = len(mix) / ANALYSIS_SR
+    total_samples = max(1, int(math.ceil(total_duration_s * OUTPUT_SR)))
+    total_sum = np.zeros(total_samples, dtype=np.float64)
+    total_weights = np.zeros(total_samples, dtype=np.float64)
 
     accepted_count = 0
     rejected_count = 0
@@ -1363,6 +1450,15 @@ def process_song(
                 subtype="PCM_16",
             )
 
+            if not args.no_total:
+                add_segment_to_timeline(
+                    mix_sum=total_sum,
+                    weight_sum=total_weights,
+                    segment=melody,
+                    start_s=window["center_start"],
+                    sr=OUTPUT_SR,
+                )
+
             if args.keep_events:
                 write_events_json(
                     wav_path.with_suffix(".json"),
@@ -1412,6 +1508,29 @@ def process_song(
                 f"| notes={best.note_count}"
             )
 
+    if not args.no_total:
+        total_audio = finalize_total_timeline(
+            total_sum,
+            total_weights,
+        )
+
+        total_path = total_out_dir / f"{src.stem}_total.wav"
+
+        sf.write(
+            total_path,
+            total_audio,
+            OUTPUT_SR,
+            subtype="PCM_16",
+        )
+
+        covered_samples = int(np.count_nonzero(total_weights > 1e-10))
+        coverage = covered_samples / max(1, len(total_weights))
+
+        print(
+            f"  [TOTAL] {total_path.relative_to(output_root)} "
+            f"| coverage={coverage:.1%}"
+        )
+
     return accepted_count, rejected_count
 
 
@@ -1457,6 +1576,11 @@ def main() -> int:
         parents=True,
         exist_ok=True,
     )
+    if not args.no_total:
+        (output_root / "total").mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
     separator = None
 
@@ -1584,6 +1708,10 @@ def main() -> int:
     )
     print(f"Metadata : {metadata_path}")
     print(f"Rejected : {rejected_path}")
+    if not args.no_total:
+        print(f"Total WAV: {output_root / 'total'}")
+    if not args.no_separation:
+        print(f"Stems    : {output_root / '_stems'}")
 
     return 1 if failed_songs == len(files) else 0
 
