@@ -16,8 +16,9 @@ Design
 8. Use HPSS/harmonic audio for pitch tracking and the corresponding RAW stem
    for pitch-local attack detection.
 9. Fuse neural onset, frame-rise onset, and pitch-local CQT attack evidence.
-10. Decode same-pitch re-attacks with a duration-aware dynamic program.
-11. Extract MAIN and BASS roles independently.
+10. Decode same-pitch re-attacks with a dip-aware duration dynamic program.
+11. Merge short low-confidence pitch chatter after decoding.
+12. Extract MAIN and BASS roles independently.
 12. Keep only high-confidence segments for each role.
 10. Resynthesize each accepted segment as a clean monophonic WAV.
 11. Reassemble accepted segments on the original song timeline into a
@@ -195,15 +196,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--minimum-note-ms", type=float, default=80.0)
 
     p.add_argument("--viterbi-fps", type=float, default=50.0)
-    p.add_argument("--min-output-note-ms", type=float, default=60.0)
+    p.add_argument("--min-output-note-ms", type=float, default=80.0)
     p.add_argument("--bridge-gap-ms", type=float, default=70.0)
     p.add_argument(
         "--retrigger-min-ms",
         type=float,
-        default=70.0,
+        default=90.0,
         help=(
-            "Minimum spacing between same-pitch re-attack boundaries derived "
-            "from Basic Pitch note onsets. Default: 70 ms."
+            "Minimum spacing between same-pitch re-attack boundaries. "
+            "Default: 90 ms."
         ),
     )
     p.add_argument(
@@ -227,10 +228,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--raw-retrigger-threshold",
         type=float,
-        default=0.30,
+        default=0.38,
         help=(
             "Threshold for fused raw onset evidence when splitting repeated "
-            "same-pitch notes. Default: 0.30."
+            "same-pitch notes. Default: 0.38."
         ),
     )
     p.add_argument(
@@ -238,10 +239,10 @@ def parse_args() -> argparse.Namespace:
         "--waveform-onset-weight",
         dest="attack_onset_weight",
         type=float,
-        default=0.22,
+        default=0.14,
         help=(
             "Weight of pitch-local CQT attack evidence from the RAW stem in "
-            "the fused retrigger score. Default: 0.22."
+            "the fused retrigger score. Default: 0.14."
         ),
     )
     p.add_argument(
@@ -256,12 +257,67 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--retrigger-split-penalty",
         type=float,
-        default=0.18,
+        default=0.28,
         help=(
             "Dynamic-program penalty for inserting a same-pitch boundary. "
-            "Higher values suppress over-segmentation. Default: 0.18."
+            "Higher values suppress over-segmentation. Default: 0.28."
         ),
     )
+    p.add_argument(
+        "--retrigger-dip-window-ms",
+        type=float,
+        default=70.0,
+        help=(
+            "Look-back window for sustain-dip validation before a repeated "
+            "note attack. Default: 70 ms."
+        ),
+    )
+    p.add_argument(
+        "--retrigger-min-dip",
+        type=float,
+        default=0.10,
+        help=(
+            "Minimum relative pre-attack salience dip expected for ambiguous "
+            "same-pitch retriggers. Strong neural attacks may bypass this. "
+            "Default: 0.10."
+        ),
+    )
+    p.add_argument(
+        "--retrigger-strong-margin",
+        type=float,
+        default=0.22,
+        help=(
+            "Onset evidence above threshold+margin may split without a clear "
+            "pre-attack dip. Default: 0.22."
+        ),
+    )
+    p.add_argument(
+        "--cleanup-fragment-ms",
+        type=float,
+        default=95.0,
+        help=(
+            "Maximum duration of a low-confidence pitch fragment eligible for "
+            "post-decode cleanup. Default: 95 ms."
+        ),
+    )
+    p.add_argument(
+        "--cleanup-confidence",
+        type=float,
+        default=0.42,
+        help=(
+            "Confidence ceiling for micro-fragment cleanup. Default: 0.42."
+        ),
+    )
+    p.add_argument(
+        "--cleanup-max-semitones",
+        type=int,
+        default=2,
+        help=(
+            "Maximum pitch distance of a short middle fragment from matching "
+            "neighbors for cleanup. Default: 2 semitones."
+        ),
+    )
+
     p.add_argument(
         "--decoder-passes",
         type=int,
@@ -291,6 +347,36 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=67,
         help="Highest MIDI pitch for the bass role. Default: 67 (G4).",
+    )
+    p.add_argument(
+        "--bass-min-output-note-ms",
+        type=float,
+        default=110.0,
+        help="Minimum decoded BASS note duration. Default: 110 ms.",
+    )
+    p.add_argument(
+        "--bass-raw-retrigger-threshold",
+        type=float,
+        default=0.42,
+        help="BASS repeated-note onset threshold. Default: 0.42.",
+    )
+    p.add_argument(
+        "--bass-attack-onset-weight",
+        type=float,
+        default=0.11,
+        help="BASS RAW-stem pitch-local attack weight. Default: 0.11.",
+    )
+    p.add_argument(
+        "--bass-retrigger-split-penalty",
+        type=float,
+        default=0.32,
+        help="BASS same-pitch split penalty. Default: 0.32.",
+    )
+    p.add_argument(
+        "--bass-retrigger-min-ms",
+        type=float,
+        default=110.0,
+        help="Minimum BASS same-pitch retrigger spacing. Default: 110 ms.",
     )
     p.add_argument("--bass-min-score", type=float, default=0.50)
     p.add_argument("--bass-min-voiced-ratio", type=float, default=0.15)
@@ -902,6 +988,7 @@ def raw_basic_pitch_decoder_inputs(
 def duration_aware_retrigger_boundaries(
     path: np.ndarray,
     onset_score: np.ndarray,
+    pitch_salience: np.ndarray,
     fps: float,
     threshold: float,
     absolute_min_ms: float,
@@ -910,17 +997,17 @@ def duration_aware_retrigger_boundaries(
     tempo_bpm: float,
     tempo_fraction: float,
     split_penalty: float,
+    dip_window_ms: float,
+    min_dip: float,
+    strong_margin: float,
 ) -> np.ndarray:
     """
-    Select same-pitch re-attacks with dynamic programming.
+    Select same-pitch re-attacks with a dip-aware semi-Markov decoder.
 
-    Pitch tracking and note-boundary decoding are deliberately separated.
-    Within each continuous Viterbi pitch run, local onset maxima become
-    candidate boundaries. DP chooses a subset that maximizes onset evidence
-    while enforcing musically plausible note durations.
-
-    This is a lightweight semi-Markov decoder: a sustained G and G-G-G share
-    the same pitch path, but differ in the optimal internal boundary sequence.
+    Weak/ambiguous attack peaks are accepted only when the sustained pitch
+    salience shows a preceding dip, which is typical of a real envelope
+    re-attack. Very strong neural onset evidence can bypass the dip condition,
+    preserving genuinely hard repeated notes that remain continuously voiced.
     """
     n = len(path)
     boundaries = np.zeros(n, dtype=bool)
@@ -943,6 +1030,10 @@ def duration_aware_retrigger_boundaries(
         1,
         int(round(dynamic_min_ms / 1000.0 * fps)),
     )
+    dip_frames = max(
+        2,
+        int(round(max(0.0, dip_window_ms) / 1000.0 * fps)),
+    )
 
     i = 0
     while i < n:
@@ -963,51 +1054,119 @@ def duration_aware_retrigger_boundaries(
 
         lo = max(0, state - pitch_tolerance)
         hi = min(127, state + pitch_tolerance)
-        curve = np.max(onset_score[lo:hi + 1, i:j], axis=0)
+
+        onset_curve = np.max(
+            onset_score[lo:hi + 1, i:j],
+            axis=0,
+        )
+        salience_curve = np.max(
+            pitch_salience[lo:hi + 1, i:j],
+            axis=0,
+        )
 
         candidates: list[tuple[int, float]] = []
+
         for rel in range(1, run_len - 1):
-            score = float(curve[rel])
+            score = float(onset_curve[rel])
+
             if score < threshold:
                 continue
-            if score < float(curve[rel - 1]) or score < float(curve[rel + 1]):
+            if (
+                score < float(onset_curve[rel - 1])
+                or score < float(onset_curve[rel + 1])
+            ):
                 continue
 
             pos = i + rel
             if pos - i < min_frames or j - pos < min_frames:
                 continue
 
-            normalized = (
-                (score - threshold) / max(1e-6, 1.0 - threshold)
-            )
-            utility = normalized - float(split_penalty)
+            # Compare the local pre-attack minimum against the surrounding
+            # sustain level. A meaningful drop supports a true re-articulation.
+            pre0 = max(0, rel - dip_frames)
+            pre1 = rel
+            post1 = min(run_len, rel + max(2, dip_frames // 2))
 
-            # Keep mildly negative candidates in the graph because a sequence
-            # of well-spaced attacks can still become optimal after duration
-            # constraints, but strongly negative evidence is useless.
-            if utility > -0.20:
+            pre = salience_curve[pre0:pre1]
+            post = salience_curve[rel:post1]
+
+            if len(pre):
+                pre_floor = float(np.percentile(pre, 20))
+                pre_level = float(np.percentile(pre, 75))
+            else:
+                pre_floor = float(salience_curve[rel])
+                pre_level = pre_floor
+
+            post_level = (
+                float(np.percentile(post, 75))
+                if len(post)
+                else float(salience_curve[rel])
+            )
+
+            reference = max(
+                1e-6,
+                pre_level,
+                post_level,
+                float(salience_curve[rel]),
+            )
+            dip = float(
+                np.clip(
+                    (reference - pre_floor) / reference,
+                    0.0,
+                    1.0,
+                )
+            )
+
+            strong_attack = score >= (
+                float(threshold) + float(strong_margin)
+            )
+
+            # Ambiguous peaks without an envelope/salience dip are the main
+            # source of chattering. Strong neural attacks remain admissible.
+            if not strong_attack and dip < min_dip:
+                continue
+
+            normalized = (
+                (score - threshold)
+                / max(1e-6, 1.0 - threshold)
+            )
+
+            # Dip provides a bounded bonus rather than acting as an absolute
+            # requirement for strong attacks.
+            dip_bonus = 0.24 * np.clip(
+                (dip - min_dip) / max(1e-6, 1.0 - min_dip),
+                0.0,
+                1.0,
+            )
+            strong_bonus = 0.10 if strong_attack else 0.0
+
+            utility = (
+                normalized
+                + float(dip_bonus)
+                + strong_bonus
+                - float(split_penalty)
+            )
+
+            if utility > -0.15:
                 candidates.append((pos, utility))
 
         if not candidates:
             i = j
             continue
 
-        # Weighted interval scheduling over candidate split points.
+        # Weighted interval scheduling across valid split points.
         m = len(candidates)
         best = np.zeros(m + 1, dtype=np.float64)
         prev_choice = np.full(m + 1, -1, dtype=np.int32)
         took = np.zeros(m + 1, dtype=bool)
-
         positions = [p for p, _ in candidates]
 
         for k in range(1, m + 1):
             pos, utility = candidates[k - 1]
 
-            # Find latest earlier candidate far enough away.
             prev_k = 0
             for q in range(k - 1, 0, -1):
-                prev_pos = positions[q - 1]
-                if pos - prev_pos >= min_frames:
+                if pos - positions[q - 1] >= min_frames:
                     prev_k = q
                     break
 
@@ -1024,6 +1183,7 @@ def duration_aware_retrigger_boundaries(
 
         k = m
         chosen: list[int] = []
+
         while k > 0:
             if took[k]:
                 chosen.append(candidates[k - 1][0])
@@ -1037,7 +1197,6 @@ def duration_aware_retrigger_boundaries(
         i = j
 
     return boundaries
-
 
 
 def note_events_to_confidence_grid(
@@ -1418,6 +1577,124 @@ def crop_notes_to_center(
     return cropped
 
 
+
+def cleanup_micro_fragments(
+    notes: list[Note],
+    max_fragment_ms: float,
+    confidence_ceiling: float,
+    max_semitones: int,
+) -> list[Note]:
+    """
+    Remove short low-confidence pitch chatter after decoding.
+
+    Conservative rules:
+    - A-B-A: if B is short, low-confidence and close in pitch, absorb it into
+      the matching A neighbors.
+    - Adjacent same-pitch fragments are merged only when one is both short and
+      low-confidence, avoiding destruction of deliberate repeated notes.
+    """
+    if len(notes) < 2:
+        return notes
+
+    work = list(notes)
+    changed = True
+
+    while changed and len(work) >= 2:
+        changed = False
+
+        # A-B-A transient artifact.
+        i = 1
+        while i + 1 < len(work):
+            left = work[i - 1]
+            mid = work[i]
+            right = work[i + 1]
+
+            mid_ms = (mid.end - mid.start) * 1000.0
+            close_pitch = (
+                abs(mid.pitch - left.pitch) <= max_semitones
+                and abs(mid.pitch - right.pitch) <= max_semitones
+            )
+            neighbors_match = left.pitch == right.pitch
+            low_conf = mid.confidence <= confidence_ceiling
+
+            if (
+                mid_ms <= max_fragment_ms
+                and low_conf
+                and close_pitch
+                and neighbors_match
+            ):
+                merged_conf = float(
+                    np.average(
+                        [left.confidence, right.confidence],
+                        weights=[
+                            max(1e-6, left.end - left.start),
+                            max(1e-6, right.end - right.start),
+                        ],
+                    )
+                )
+                work[i - 1:i + 2] = [
+                    Note(
+                        start=left.start,
+                        end=right.end,
+                        pitch=left.pitch,
+                        confidence=merged_conf,
+                    )
+                ]
+                changed = True
+                break
+
+            i += 1
+
+        if changed:
+            continue
+
+        # Same-pitch accidental micro-split.
+        i = 0
+        while i + 1 < len(work):
+            a = work[i]
+            b = work[i + 1]
+
+            if a.pitch != b.pitch:
+                i += 1
+                continue
+
+            a_ms = (a.end - a.start) * 1000.0
+            b_ms = (b.end - b.start) * 1000.0
+
+            a_noisy = (
+                a_ms <= max_fragment_ms
+                and a.confidence <= confidence_ceiling
+            )
+            b_noisy = (
+                b_ms <= max_fragment_ms
+                and b.confidence <= confidence_ceiling
+            )
+
+            if not (a_noisy or b_noisy):
+                i += 1
+                continue
+
+            dur_a = max(1e-6, a.end - a.start)
+            dur_b = max(1e-6, b.end - b.start)
+            merged_conf = float(
+                (a.confidence * dur_a + b.confidence * dur_b)
+                / (dur_a + dur_b)
+            )
+
+            work[i:i + 2] = [
+                Note(
+                    start=a.start,
+                    end=b.end,
+                    pitch=a.pitch,
+                    confidence=merged_conf,
+                )
+            ]
+            changed = True
+            break
+
+    return work
+
+
 def quality_metrics(
     notes: list[Note],
     duration_s: float,
@@ -1502,6 +1779,12 @@ def _decode_candidate_pass(
     tempo_bpm: float,
     tempo_retrigger_fraction: float,
     retrigger_split_penalty: float,
+    retrigger_dip_window_ms: float,
+    retrigger_min_dip: float,
+    retrigger_strong_margin: float,
+    cleanup_fragment_ms: float,
+    cleanup_confidence: float,
+    cleanup_max_semitones: int,
     decode_min_midi: int,
     decode_max_midi: int,
     tmp_dir: Path,
@@ -1569,6 +1852,7 @@ def _decode_candidate_pass(
         retrigger_boundaries = duration_aware_retrigger_boundaries(
             path=path,
             onset_score=fused_onset,
+            pitch_salience=grid,
             fps=decoder_fps,
             threshold=raw_retrigger_threshold,
             absolute_min_ms=retrigger_min_ms,
@@ -1577,6 +1861,9 @@ def _decode_candidate_pass(
             tempo_bpm=tempo_bpm,
             tempo_fraction=tempo_retrigger_fraction,
             split_penalty=retrigger_split_penalty,
+            dip_window_ms=retrigger_dip_window_ms,
+            min_dip=retrigger_min_dip,
+            strong_margin=retrigger_strong_margin,
         )
         fps = decoder_fps
 
@@ -1632,6 +1919,13 @@ def _decode_candidate_pass(
         retrigger_boundaries=retrigger_boundaries,
     )
 
+    notes = cleanup_micro_fragments(
+        notes,
+        max_fragment_ms=cleanup_fragment_ms,
+        confidence_ceiling=cleanup_confidence,
+        max_semitones=cleanup_max_semitones,
+    )
+
     center_offset = center_start - analysis_start
     center_duration = center_end - center_start
 
@@ -1660,6 +1954,12 @@ def analyze_candidate(
     tempo_bpm: float,
     tempo_retrigger_fraction: float,
     retrigger_split_penalty: float,
+    retrigger_dip_window_ms: float,
+    retrigger_min_dip: float,
+    retrigger_strong_margin: float,
+    cleanup_fragment_ms: float,
+    cleanup_confidence: float,
+    cleanup_max_semitones: int,
     decode_min_midi: int,
     decode_max_midi: int,
     decoder_passes: int,
@@ -1711,6 +2011,12 @@ def analyze_candidate(
             tempo_bpm=tempo_bpm,
             tempo_retrigger_fraction=tempo_retrigger_fraction,
             retrigger_split_penalty=retrigger_split_penalty,
+            retrigger_dip_window_ms=retrigger_dip_window_ms,
+            retrigger_min_dip=retrigger_min_dip,
+            retrigger_strong_margin=retrigger_strong_margin,
+            cleanup_fragment_ms=cleanup_fragment_ms,
+            cleanup_confidence=cleanup_confidence,
+            cleanup_max_semitones=cleanup_max_semitones,
             decode_min_midi=decode_min_midi,
             decode_max_midi=decode_max_midi,
             tmp_dir=tmp_dir,
@@ -2382,15 +2688,45 @@ def process_song(
                             transcriber=transcriber,
                             fps=args.viterbi_fps,
                             bridge_gap_ms=args.bridge_gap_ms,
-                            min_output_note_ms=args.min_output_note_ms,
-                            retrigger_min_ms=args.retrigger_min_ms,
+                            min_output_note_ms=(
+                                args.bass_min_output_note_ms
+                                if role == "bass"
+                                else args.min_output_note_ms
+                            ),
+                            retrigger_min_ms=(
+                                args.bass_retrigger_min_ms
+                                if role == "bass"
+                                else args.retrigger_min_ms
+                            ),
                             retrigger_pitch_tolerance=args.retrigger_pitch_tolerance,
                             raw_active_threshold=args.raw_active_threshold,
-                            raw_retrigger_threshold=args.raw_retrigger_threshold,
-                            attack_onset_weight=args.attack_onset_weight,
+                            raw_retrigger_threshold=(
+                                args.bass_raw_retrigger_threshold
+                                if role == "bass"
+                                else args.raw_retrigger_threshold
+                            ),
+                            attack_onset_weight=(
+                                args.bass_attack_onset_weight
+                                if role == "bass"
+                                else args.attack_onset_weight
+                            ),
                             tempo_bpm=tempo,
                             tempo_retrigger_fraction=args.tempo_retrigger_fraction,
-                            retrigger_split_penalty=args.retrigger_split_penalty,
+                            retrigger_split_penalty=(
+                                args.bass_retrigger_split_penalty
+                                if role == "bass"
+                                else args.retrigger_split_penalty
+                            ),
+                            retrigger_dip_window_ms=args.retrigger_dip_window_ms,
+                            retrigger_min_dip=args.retrigger_min_dip,
+                            retrigger_strong_margin=args.retrigger_strong_margin,
+                            cleanup_fragment_ms=(
+                                max(args.cleanup_fragment_ms, 120.0)
+                                if role == "bass"
+                                else args.cleanup_fragment_ms
+                            ),
+                            cleanup_confidence=args.cleanup_confidence,
+                            cleanup_max_semitones=args.cleanup_max_semitones,
                             decode_min_midi=source.min_midi,
                             decode_max_midi=source.max_midi,
                             decoder_passes=args.decoder_passes,
@@ -2624,6 +2960,28 @@ def main() -> int:
         raise SystemExit("--tempo-retrigger-fraction must be >= 0")
     if args.retrigger_split_penalty < 0.0:
         raise SystemExit("--retrigger-split-penalty must be >= 0")
+    if args.retrigger_dip_window_ms < 0.0:
+        raise SystemExit("--retrigger-dip-window-ms must be >= 0")
+    if not 0.0 <= args.retrigger_min_dip <= 1.0:
+        raise SystemExit("--retrigger-min-dip must be 0..1")
+    if args.retrigger_strong_margin < 0.0:
+        raise SystemExit("--retrigger-strong-margin must be >= 0")
+    if args.cleanup_fragment_ms < 0.0:
+        raise SystemExit("--cleanup-fragment-ms must be >= 0")
+    if not 0.0 <= args.cleanup_confidence <= 1.0:
+        raise SystemExit("--cleanup-confidence must be 0..1")
+    if args.cleanup_max_semitones < 0:
+        raise SystemExit("--cleanup-max-semitones must be >= 0")
+    if args.bass_min_output_note_ms < 0.0:
+        raise SystemExit("--bass-min-output-note-ms must be >= 0")
+    if not 0.0 <= args.bass_raw_retrigger_threshold <= 1.0:
+        raise SystemExit("--bass-raw-retrigger-threshold must be 0..1")
+    if not 0.0 <= args.bass_attack_onset_weight <= 0.40:
+        raise SystemExit("--bass-attack-onset-weight must be 0..0.40")
+    if args.bass_retrigger_split_penalty < 0.0:
+        raise SystemExit("--bass-retrigger-split-penalty must be >= 0")
+    if args.bass_retrigger_min_ms < 0.0:
+        raise SystemExit("--bass-retrigger-min-ms must be >= 0")
     if args.decoder_extra_context_ms < 0.0:
         raise SystemExit("--decoder-extra-context-ms must be >= 0")
     if not 0 <= args.bass_min_midi <= args.bass_max_midi <= 127:
